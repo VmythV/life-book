@@ -26,10 +26,10 @@
 ## 文档
 
 - [品牌命名方案](docs/brand-name.md)
+- [产品功能说明](docs/product-features.md)
 
 ## 品牌
 
 - 对外名称：**生活有谱**
 - 项目代号：`life-book`
 - 品牌口号：**每件生活小事，都有着落。**
-
