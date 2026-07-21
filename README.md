@@ -27,6 +27,8 @@
 
 - [品牌命名方案](docs/brand-name.md)
 - [产品功能说明](docs/product-features.md)
+- [产品决策记录](docs/product-decisions.md)
+- [产品路线图](docs/roadmap.md)
 
 ## 品牌
 
