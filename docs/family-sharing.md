@@ -1,6 +1,6 @@
 # 生活有谱家庭空间与协作规范
 
-> 项目代号：`life-book` · 版本：v1.0 · 更新日期：2026-07-26 · 状态：P2 家庭首期实施基线
+> 项目代号：`life-book` · 版本：v1.1 · 更新日期：2026-07-26 · 状态：P2 家庭首期实施基线
 >
 > 权威范围：家庭空间、成员、邀请、基础角色、记录主动共享、共同处理、提醒订阅、审计、成员退出与家庭解散
 >
@@ -70,8 +70,9 @@
 ### FAMILY-011：Membership 状态
 
 ```text
-active → leaving/removing → removed
-          └→ active（操作取消或服务端失败）
+Membership N: active → leaving/removing → removed（终态）
+                       └→ active（操作取消或服务端失败）
+再次接受新邀请 → Membership N+1（新 ID、新 membershipEpoch）
 ```
 
 - Invitation accepted 与 active membership 在一个服务端事务产生；
@@ -79,7 +80,7 @@ active → leaving/removing → removed
 - 只有 active membership 可读取/写入；
 - leaving 由普通 member 发起，removing 由 owner 发起；
 - 状态转换期间服务端串行权限与 mutation；
-- removed 是历史状态，不恢复；再次加入使用新 Invitation 激活同一组合的新 membership revision，并保留审计链。
+- removed 是历史终态，不恢复；再次加入使用新 Invitation 创建新 membership ID 与严格递增的 membershipEpoch，并保留旧 membership 审计链；同一 `(spaceId, accountId)` 最多一条未终结 membership。
 
 ### FAMILY-012：空间状态
 
@@ -90,7 +91,7 @@ active
    └→ deleting → deleted
 ```
 
-deletion_scheduled 期间家庭内容只读，禁止邀请、移动、普通编辑和新提醒投递；允许 owner 取消、成员导出允许范围、查看审计和处理所有权阻塞。deleting/deleted 不允许恢复普通写入。
+deletion_scheduled 期间家庭内容只读，禁止邀请、移动、普通编辑和新提醒投递；ReminderSubscription/ReminderInstance 进入可恢复 paused。允许 owner 取消、成员导出允许范围、查看审计和处理所有权阻塞。取消删除只恢复未来提醒，已过时实例 expired；deleting/deleted 才把订阅 cancelled 且不允许恢复普通写入。离线设备在同步状态前可能仍展示旧通知，不能承诺立即远程撤回。
 
 ## 3. 基础角色权限
 
@@ -100,7 +101,7 @@ deletion_scheduled 期间家庭内容只读，禁止邀请、移动、普通编�
 | --- | :---: | :---: |
 | 查看、搜索家庭记录和附件 | 是 | 是 |
 | 新建、编辑、复制、归档记录 | 是 | 是 |
-| 完成/跳过周期、勾选清单、添加库存流水 | 是 | 是 |
+| 完成/跳过周期、勾选清单、提交库存变化 | 是 | 是 |
 | 单条移入回收站、恢复 | 是 | 是 |
 | 永久删除单条记录 | 是 | 否 |
 | 批量删除、清空回收站 | 是 | 否 |
@@ -132,7 +133,9 @@ deletion_scheduled 期间家庭内容只读，禁止邀请、移动、普通编�
 
 权限使用服务端接受 mutation 的顺序：
 
+- 每个家庭写入携带提交时的 authorizationMembershipId；服务端要求它仍是该账号当前 active tenure；
 - 成员移除先提交，则其之后到达的写入 rejected_forbidden；
+- 同一账号重新加入后，旧 membership ID 的离线写入仍 rejected_forbidden，不能借新 membership 恢复；
 - 写入先被服务端接受，则事实保留并在随后移除审计中可见；
 - owner 高风险命令、所有权转移、移除和家庭删除在空间级串行；
 - 客户端收到拒绝后停止重放，不把内容复制到个人空间或建立“本地胜出”冲突。
@@ -205,6 +208,7 @@ draft → active → accepted
 - 通过改 spaceId 规避权限；
 - 将家庭附件变成个人附件；
 - 把拒绝当作普通字段冲突让用户“选择本机版本”。
+- 同一账号重新加入后用新 membership 重放旧 mutation。
 
 ## 6. 所有权转移
 
@@ -260,22 +264,22 @@ draft → active → accepted
 preflight
 → awaiting_confirmation
 → transferring
-→ committed
-  ├→ failed_retryable
-  └→ rolled_back
+   ├→ committed（终态）
+   └→ failed_retryable → transferring / rolled_back（终态）
 ```
 
 确认前重新验证成员、空间和记录版本。逻辑提交必须保证：
 
-- source 写入 move tombstone，target 保持同一 record/aggregate ID；
+- 只能在线调用 SYNC-037 的 SpaceTransferOperation；服务端在同一事务锁定记录、两个空间和双方 membership；
+- 记录及聚合子对象保持同一稳定 ID，服务端原子改变 spaceId；source 写 `record_departed(transferId)`，target 写 `record_arrived(transferId, aggregateSnapshot)`，二者不是 Tombstone；
 - 所有聚合子对象、分类标签映射、合法关联和提醒计划属于 target；
 - 附件内容重新授权/加密和哈希验证完成；
-- 目标 committed 前不可见，来源在 committed 前保持唯一可写；
+- transferring 期间记录只读；committed 前目标不可见，提交后旧源 mutation rejected_moved 且不自动改投；
 - initiator 默认创建 active ReminderSubscription，其他成员不自动订阅；
 - source 记录私有移动审计，target 记录 server_verified 共享审计；
 - 所有设备重新同步并对账通知。
 
-物理附件传输失败进入 failed_retryable，用户可继续或回滚；不得留下两份可写记录或半数附件可见的家庭记录。
+物理附件传输失败进入 failed_retryable，用户可继续或在提交前回滚；不得留下两份可写记录或半数附件可见的家庭记录。客户端按 transferId 幂等处理 arrived/departed 乱序：同时有两空间权限时同一 ID 原子切换，只有源权限时清除内容并留无内容收据，只有目标权限时从 arrived 建立副本。
 
 ### FAMILY-063：敏感记录加强确认
 
@@ -290,16 +294,16 @@ preflight
 - 预检目标个人空间、其他成员失去访问、关联断开、附件、提醒和冲突；
 - 未解决的成员写入或附件上传必须先同步/取消；
 - 使用与 FAMILY-060～062 相同的原子移动协调；
-- 家庭保留内容最小 move tombstone 和审计，不保留可浏览正文副本；
+- 家庭变化流保留不含内容的 record_departed 收据和审计，不创建永久删除 Tombstone，也不保留可浏览正文副本；
 - 目标个人空间携带领域聚合历史，但不携带完整家庭 AuditEvent 或成员显示名；
-- 其他成员的 ReminderSubscription 取消，owner 的订阅转换为个人设备选择。
+- 所有家庭 ReminderSubscription 取消；为目标个人空间按 owner 原设备选择创建新的个人 subscription，不复用 membership 绑定的旧 ID。
 
 ### FAMILY-071：复制为个人记录
 
-任一 active 成员可以对可见家庭记录发起明确“复制到个人空间”，使用 BR-030 的类型适配复制规则：
+任一 active 成员可以对可见家庭记录发起明确“复制到个人空间”，使用 BR-027 的类型适配复制规则：
 
 - 新记录及所有可复制子对象使用新 ID；
-- 不复制家庭审计、membership、订阅、完成/提醒投递历史或跨空间关联；
+- 不复制家庭审计、membership、订阅、完成/跳过/仅本次改期/稍后/提醒投递历史、任何 Occurrence、已结束 RecurrenceSegment 或跨空间关联；重复事项只复制当前有效的未来规则配置；
 - 家庭物品清除库存流水并要求确认新期初数量；
 - 清单清除项目完成状态和绝对提醒；
 - 重要日期重新确认具体日期/起始年份；
@@ -318,7 +322,7 @@ preflight
 - 勾选/取消按服务端接受顺序保留操作历史；
 - 同一周期完成与跳过要求解决；
 - RecurrenceSegment 并发编辑整体冲突，不拼接；
-- 库存不可变流水合并并由服务端 ledgerSequence 排序；会造成负库存的后操作拒绝；
+- 并发库存意图由服务端按 `(spaceId, recordId)` 串行接受；每个 accepted 意图创建一条新流水，既有流水永不重排或重算；会造成负库存的意图 rejected；
 - adjust 基准改变必须重新确认；
 - 删除墓碑、成员失权和更严格隐私优先。
 
@@ -349,19 +353,21 @@ preflight
 - owner 首期不能强制其他成员订阅；assignment 来源字段为后续明确分工预留；
 - 家庭中已有低库存事件时，成员主动订阅只影响未来 episode，不补发已确认周期。
 
+状态写法唯一：成员主动退订使用 `status=active, mode=off`，以后可重新开启；家庭 deletion_scheduled 使用 `status=paused, pauseReason=space_deletion_scheduled` 并保留原 mode；成员离开/被移除、计划永久失效或家庭到期删除使用终态 cancelled。重新加入后按新 membership 创建 subscription，不恢复旧 cancelled 项。
+
 ### FAMILY-091：共享状态处理
 
-任一有权成员完成/跳过共享周期、完成清单、知道了低库存或改变记录状态后：
+共享业务动作与个人提醒动作必须分开：
 
-- 业务 mutation 对所有成员同步；
-- 所有 ReminderSubscription 的未来重复催促按来源规则取消；
+- 任一有权成员完成/跳过共享周期、完成共享清单、把低库存物品加入共享采购清单、库存恢复、归档或删除时，业务 mutation 对所有成员同步，并按来源规则对账所有适用 ReminderSubscription；
+- 一个成员对低库存或其他提醒点“知道了”，只确认该 membership/subscription 的 ReminderInstance 并停止其个人催促，不修改 LowStockEpisode 或其他成员实例；
 - 已展示通知只能尽力清理；
 - 同步延迟时可能多成员同时看到首次提醒，不承诺全局恰好一次；
 - “稍后提醒”默认只创建操作成员自己的订阅投递，不改其他成员提醒或业务时间。
 
 ### FAMILY-092：成员变化
 
-成员 leaving/removing 时，在同一服务端逻辑操作取消其所有 active ReminderSubscription、推送目标和待发送服务通知。再次加入不恢复旧订阅；由成员重新选择。所有权转移不自动改变双方订阅。
+成员 leaving/removing 时，在同一服务端逻辑操作把其所有 active/paused ReminderSubscription 置 cancelled，并取消推送目标和待发送服务通知。mode=off 仍是 active 关系，也一并 cancelled。再次加入基于新 membership 创建新订阅；由成员重新选择。所有权转移不自动改变双方订阅。
 
 ## 11. 家庭操作记录
 
@@ -390,7 +396,7 @@ summary 只含对象类型/ID、字段类别、项目数量或库存动作类别
 
 ### FAMILY-102：保留
 
-家庭 active 时保留用户可见审计；家庭删除后，含生活内容的辅助快照随内容清理，最小高风险审计/同步收据默认保留 400 天，用于安全、争议和防旧设备复活，随后匿名化或删除。法律要求不同期限时以完成地区审阅后的合规规范为准，并在删除确认中准确披露。
+家庭 active 时保留用户可见审计；家庭删除后，含生活内容的辅助快照随内容清理，默认 400 天只保留不含标题/正文/附件/精确数量的最小高风险审计、Tombstone 和幂等收据，用于安全、争议和防旧设备复活，随后匿名化或删除。裁剪 Tombstone 前按 SYNC-052 滚动 snapshot generation，旧 generation 不再可写。法律要求不同期限时以完成地区审阅后的合规规范为准，并在删除确认中准确披露。
 
 ## 12. 家庭删除
 
@@ -404,7 +410,7 @@ owner 发起前必须：
 4. 解决进行中的所有权转移/成员移除/跨空间移动；
 5. 输入家庭名称或本地化确认词。
 
-确认后进入 deletion_scheduled，默认 7 天后永久删除；页面显示精确日期，通知全部成员，暂停新写入、邀请和未来提醒。owner 在截止前可取消并触发各设备重新同步/对账；取消后只从当前时点恢复未来提醒，不补发暂停期间已经过去的通知。
+确认后进入 deletion_scheduled，默认 7 天后永久删除；页面显示精确日期，通知全部成员，暂停新写入、邀请，将所有非 cancelled ReminderSubscription 和 planned/scheduled ReminderInstance 置 paused 并停止新远程投递。owner 在截止前可取消并触发各设备重新同步/对账；仅恢复原 mode!=off 的订阅和未来实例，不补发暂停期间已经过去的通知。离线设备同步前可能仍展示旧平台通知。
 
 ### FAMILY-111：到期删除
 
@@ -415,7 +421,7 @@ owner 发起前必须：
 3. 永久删除记录聚合、模板、分类标签和可见附件引用；
 4. 擦除无其他合法引用的对象内容和云备份；
 5. 创建空间/实体 Tombstone 与最小审计收据；
-6. 取消 membership、Invitation、OwnershipTransfer、ReminderSubscription、推送和会话授权；
+6. 终结 membership、Invitation、OwnershipTransfer，把 active/paused/off ReminderSubscription 全部置 cancelled，并取消推送和会话授权；
 7. 置 deleted 并通知在线设备清理本地家庭数据。
 
 任一步失败保持 deleting 并由服务端幂等继续，不能回到一半可写。删除不会把内容复制给 owner 或 member。
@@ -464,7 +470,7 @@ P2 开始实现前必须关闭 OQ-006。默认设计使用 TLS 与服务端存�
 
 ### FAMILY-131：邀请和成员竞态
 
-覆盖：接受/撤销同到达、邀请到期边界、绑定账号不符、满员、重复接受、owner 同时移除、成员离线写入与移除先后、再次邀请。每一结果都验证 membership 唯一、审计和无内容泄漏。
+覆盖：接受/撤销同到达、邀请到期边界、绑定账号不符、满员、重复接受、owner 同时移除、成员离线写入与移除先后、再次邀请。每一结果都验证最多一条未终结 membership、旧 membership 终态、新 ID/epoch、审计和无内容泄漏；重新加入后上传旧 authorizationMembershipId 仍必须拒绝。
 
 ### FAMILY-132：所有权与删除
 
@@ -472,11 +478,11 @@ P2 开始实现前必须关闭 OQ-006。默认设计使用 TLS 与服务端存�
 
 ### FAMILY-133：跨空间移动
 
-五种记录分别覆盖分类标签同名、关系一起移动/断开、附件失败、敏感状态、提醒订阅、未解决冲突、回收站和回滚。验证任一观察点至多一个空间可写、ID 保持、个人审计不泄漏、家庭审计从共享开始。
+五种记录分别覆盖分类标签同名、关系一起移动/断开、附件失败、敏感状态、提醒订阅、未解决冲突、回收站和提交前回滚。覆盖 arrived/departed 两种乱序、重复事件、仅源权限、仅目标权限、双空间权限及移动后旧 mutation；验证任一观察点至多一个空间可写、ID 保持、移动不生成 Tombstone、个人审计不泄漏、家庭审计从共享开始。
 
 ### FAMILY-134：共同处理和提醒
 
-至少三账号、每账号两设备交错执行清单勾选、周期完成/跳过、库存买入/使用/调整、规则编辑、trash/restore 和 snooze。验证 SYNC-042 冲突、ledgerSequence、跨成员提醒取消及“稍后提醒只影响本人”。
+至少三账号、每账号两设备交错执行清单勾选、周期完成/跳过、库存买入/使用/调整、规则编辑、trash/restore 和 snooze。验证 SYNC-042 冲突、库存意图串行和流水不可变、mode=off/paused/cancelled 三态、空间删除暂停/恢复、重新加入不恢复订阅，以及“知道了/稍后只影响本人、共享来源动作影响适用成员”。
 
 ### FAMILY-135：移除与数据边界
 
@@ -486,4 +492,5 @@ P2 开始实现前必须关闭 OQ-006。默认设计使用 TLS 与服务端存�
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.1 | 2026-07-26 | 统一 membership epoch、transfer envelope、库存权威过账、订阅三态、收件人确认和家庭删除暂停语义。 |
 | v1.0 | 2026-07-26 | 定义家庭空间不变量、两类角色、邀请、成员、所有权、主动共享、协作冲突、提醒订阅、审计与删除流程。 |
