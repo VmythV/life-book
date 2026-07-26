@@ -1,6 +1,6 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.14 · 更新日期：2026-07-26 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.15 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
@@ -559,7 +559,7 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 
 当前证据的唯一身份至少绑定 `(reminderInstanceId, installation/device slot, transport, platform, recipientSlot, notificationDatasetEpoch, platformRequestId, attemptSequence)`。同一身份的最新 attempt 必须 `status=accepted`，且 request ID、epoch、fingerprint、precision、environment generation、capability fingerprint 和 adapter contract 全部匹配当前输入；最新 requested/rejected/missing/cancelled 使较早 accepted 永久失效。本实体是 device-only 技术事实，不进入 portable backup。
 
-纯隐私放宽不得自动扩大已经交给平台的内容或动作：若没有其他 replace 原因，desired mapper 继续采用当前 accepted Delivery 的 `effectivePrivacyMode/category/action` 作为 `effectiveScheduledPresentationContract`，直到内容/时间/合同等自然重排或用户明确“更新已安排通知”。`open_only` 是任意仍获授权目标的严格只导航子集，来源后来变为非敏感时仍允许该旧 open response 在 fresh Lease B 下导航，但绝不能恢复来源类别 mutating action；隐私收紧时先清旧富动作请求，清理前到达的 current-epoch 富动作只可 `business_noop`。
+纯隐私放宽不得自动扩大已经交给平台的内容或动作：若没有其他 replace 原因，desired mapper 继续采用当前 accepted Delivery 的 `effectivePrivacyMode/category/action` 作为 `effectiveScheduledPresentationContract`，直到内容/时间/合同等自然重排或用户明确“更新已安排通知”。用户的明确更新选择必须成为绑定目标 input revision 的 device-only 耐久意图，经过成功 guarded publish 后才可清除，不能依赖一次内存事件。`open_only` 是任意仍获授权目标的严格只导航子集，来源后来变为非敏感时仍允许该旧 open response 在 fresh Lease B 下导航，但绝不能恢复来源类别 mutating action。隐私收紧时先清旧内容快照；只有收紧后的当前有效呈现合同已经撤销旧 category/action（例如转为 hidden/open_only）时，清理前到达的旧动作才只能 `business_noop`。仅 `full→title_only` 且 category/action 未变时仍按 fresh Lease B 的当前授权和状态执行，不能把文案收紧误当作动作撤权。
 
 ### 14.4 `NotificationActionInbox`
 
@@ -580,13 +580,18 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 | `sourceType`、`sourceId` | `hidden` 或业务来源枚举、`EntityId?` | `hidden` 只是 payload 隐私哨兵，不是业务来源类型；解锁后由 reminderInstanceId 反查。 |
 | `spaceId` | `EntityId?` | P2 普通 payload 的可选不透明上下文；hidden 时必须为空，不能作为授权事实。 |
 | `receivedAt`、`processedAt` | `Instant`、`Instant?` | 不用设备时间决定幂等或跨设备顺序。 |
-| `processingState` | `pending \| processing \| applied \| business_noop \| failed_retryable \| failed_terminal` | `business_noop` 用于 current-epoch 但来源已经终态/失权/过期；stale epoch 不入箱。 |
+| `processingState` | `pending \| processing \| applied \| business_noop \| stale_noop \| failed_retryable \| failed_terminal` | `business_noop` 用于 identity current 但来源已经终态/失权/过期；`stale_noop` 用于入箱后 epoch/request identity 改变的无目标终态；Lease A 已发现的 stale response 不入箱。 |
+| `processingAttempt` | `LongCounter` | 初始为 `0`；每次 CAS claim 时 checked +1，不用时间决定最新处理者。 |
+| `claimOwnerSessionId`、`claimToken` | `EntityId?` | 仅 processing 必填；绑定当前 App 进程会话与本次 claim，终态或退回 pending 时清空。 |
+| `claimedAt` | `Instant?` | 仅作诊断；claim 有效性使用进程会话与单调时钟，不以可回拨墙钟作正确性依据。 |
 | `resultCode` | 受控无内容码? | 不保存标题、正文、原始 payload 或平台错误。 |
 | 公共元数据 | `EntityMeta` | revision 只跟踪本机 inbox 状态，不参与同步。 |
 
-只有短 parser Lease A 通过 active epoch/request/category fence 后才能创建本实体；actionInboxId 按 TD-009 把 categoryContractVersion 纳入版本敏感 hash。`sourceType=hidden` 当且仅当 `categoryContractId=open_only`；此时 category/action version 均为 1、`sourceId=null`、payload 无 spaceId 且 response `actionId` 只能是 open。任一非法组合在 Lease A 前拒绝。敏感通知必须使用该组合，非敏感通知也只有在有效呈现合同选择更严格 open-only 时可用。
+只有 payload 先通过 bounded 语法、大小、ID grammar、版本、category/action allowlist 与 hidden/open-only 交叉字段校验，随后短 parser Lease A 再通过 active epoch/request/category registry fence，才能创建本实体；actionInboxId 按 TD-009 把 transport 与 categoryContractVersion 纳入版本敏感 hash。`sourceType=hidden` 当且仅当 `categoryContractId=open_only`；此时 category/action version 均为 1、`sourceId=null`、payload 无 spaceId，且 response `actionId` 只能是 open。任一非法组合在 Lease A 前拒绝。敏感通知必须使用该组合，非敏感通知也只有在有效呈现合同选择更严格 open-only 时可用。
 
-写入 inbox 后立即释放 Lease A，应用锁/用户等待期间不持有 DatasetReadLease。解锁后取得 fresh action/navigation Lease B，重新验证 inbox epoch、request identity、当前授权和来源；mutating action 在 Lease B 下以单一领域事务处理，默认 open 在紧邻导航前也必须通过 Lease B。open 不持久化解析出的目标：router 接受以 actionInboxId 幂等标识、在 Lease B 下重新生成的 NavigationIntent 后把 inbox 置 applied；响应重放即使已有 applied 结果，也不能绕过 fresh fence 或复用旧目标缓存。
+写入 inbox 后立即释放 Lease A，应用锁/用户等待期间不持有 DatasetReadLease。解锁后取得 fresh action/navigation Lease B，重新验证 inbox epoch、request identity、当前授权和来源；epoch/request identity 已变时以短事务落为终态 `stale_noop`，不得冒充 `business_noop`。mutating action 在 Lease B 下以单一领域事务处理，默认 open 在紧邻导航前也必须通过 Lease B。open 不持久化解析出的目标：router 接受以 actionInboxId 幂等标识、在 Lease B 下重新生成的 NavigationIntent 后把 inbox 置 applied；响应重放即使已有终态结果，也不能绕过 fresh fence 或复用旧目标缓存。
+
+processor 只有取得 Lease B 后，才能以 `(actionInboxId, expectedState, processingAttempt, claimOwnerSessionId, claimToken)` CAS 将 `pending/failed_retryable→processing`。完成必须在仍持有同 claim 与 Lease B 时迁移为 `applied/business_noop/stale_noop/failed_retryable/failed_terminal`；业务 mutation、inbox 终态、输入修订和后续对账任务仍是一个事务。每个 App 进程拥有随机 session ID；启动时立即把其他 session 遗留的 processing claim 回收到 pending，同一 session 的单调时钟 watchdog 也可回收超时 claim。`failed_retryable` 只能由带退避的耐久任务重新入队；Repository 再次 active、App 启动/前台和成功解锁都必须幂等扫描 pending/到期 retryable。Lease B 暂不可得时不 claim，保持 pending 并保留耐久唤醒任务，因此崩溃、锁屏或数据集切换都不会永久卡住 inbox。
 
 `validating`、integrity-blocked 或 Repository 未开放时的 `deferred_unclassified` 只是瞬时分类，不创建 inbox、不写 App 明文暂存、不清平台 last response/目标通知。notification subsystem 第一次重新进入 active 必须主动 re-fetch 平台 last response 并从 bounded parse 重跑；若 adapter 不保证保留，只能 targetless fallback 并记录无内容诊断。
 
@@ -701,7 +706,7 @@ NotificationDelivery accepted、iOS pending、Android adapter registry、远程�
 
 #### DOM-074：通知动作租约分段
 
-parser Lease A 只覆盖 bounded parse 后的 active epoch/request/category fence 与 inbox 写入，随后立即释放；人机解锁等待不持有租约。解锁后无法取得 Lease B 时保持 inbox pending 并 defer，不能误标 stale；取得 fresh action/navigation Lease B 后，若 epoch/request identity 已变化则 stale targetless no-op，若 identity 仍 current 但授权、来源、动作或 category 语义已不允许，则在短事务消费 inbox 为 `business_noop`。mutating command 在 Lease B 下原子提交，默认 open 在紧邻导航前也必须 fresh fence。`validating` 等无法分类阶段不创建 inbox，并按 REM-062 defer。
+parser Lease A 只覆盖预先完成 bounded syntax/allowlist/cross-field 校验后的 active epoch/request/category fence 与 inbox 写入，随后立即释放；人机解锁等待不持有租约。解锁后无法取得 Lease B 时保持 inbox pending 并 defer，不能误标 stale；取得 fresh action/navigation Lease B 后，若 epoch/request identity 已变化则以 `stale_noop` 终结且不得解析目标，若 identity 仍 current 但授权、来源、动作或 category 语义已不允许，则在短事务消费 inbox 为 `business_noop`。mutating command 在 Lease B 下原子提交，默认 open 在紧邻导航前也必须 fresh fence。`validating` 等无法分类阶段不创建 inbox，并按 REM-062 defer。
 
 #### DOM-075：通知对账发布原子性
 
@@ -1085,6 +1090,7 @@ StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.15 | 2026-07-26 | 增加 ActionInbox stale_noop 与可恢复 claim 状态机，耐久化明确的隐私放宽刷新意图，并区分文案收紧与动作撤权。 |
 | v1.14 | 2026-07-26 | 统一提醒对账的唯一输入修订护栏，并明确 sealed SchedulingRun 仅允许 phase 进入发布或丢弃终态。 |
 | v1.13 | 2026-07-26 | 增加 NotificationInputRevision、完整 sealed SchedulingRun/Decision 发布、fresh action lease、有效呈现合同、确定性恢复优先级和 P1 ReminderDeliveryAggregate，并校正 ExactDecimal 值域。 |
 | v1.12 | 2026-07-26 | 增加 NotificationDatasetEpoch、ActionInbox、ReconciliationState、同 epoch Delivery 证据和激活门事务不变量，并固定恢复后的提醒状态规范化。 |
