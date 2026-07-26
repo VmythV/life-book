@@ -5,7 +5,7 @@
 > Decision owners：客户端架构负责人、服务端架构负责人、数据负责人  
 > Scope：P0～P2 领域对象、SQLite、JSON/HTTP、备份、同步和服务端之间的基础标量  
 > Related requirements：领域模型 §2、REC-001～003、REC-020～023、BR-082、SYNC-032、SYNC-034、QR-022、QR-090～091、QR-110  
-> Related ADRs：[TD-002](0002-offline-first-client-architecture.md)、[TD-003](0003-encrypted-local-database.md)、[TD-007](0007-time-recurrence-engine.md)、[TD-010](0010-snapshot-schema-and-migrations.md)、[TD-014](0014-api-style-and-contract-versioning.md)  
+> Related ADRs：[TD-002](0002-offline-first-client-architecture.md)、[TD-003](0003-encrypted-local-database.md)、[TD-007](0007-time-recurrence-engine.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、[TD-014](0014-api-style-and-contract-versioning.md)
 > Decision gate：跨 TypeScript、SQLite、备份和服务端的兼容 fixture 全部通过后，才允许冻结首个持久化 schema
 
 ## Context
@@ -23,7 +23,7 @@
 - `LocalDate`、`LocalTime` 和 `TimeZoneId` 独立保存，绝不靠 `Instant` 反推用户原意；
 - `ExactDecimal` 使用 3 位定标的整数语义，客户端为精确整数 value object，SQLite/JSON 为规范十进制文本；
 - `SortKey` 使用 128-bit 无符号整数的 32 位小写十六进制编码，并以中点插入、必要时事务内重排；
-- 本地 `Revision` 限定在安全的 32-bit 正整数；服务端版本/序列使用 64-bit 范围，但在 JavaScript、SQLite 和 JSON 中始终作为规范十进制字符串处理；
+- 本地 `Revision` 限定在安全的 32-bit 正整数；服务端版本/序列以及本地持久增长 control/mutation/notification epoch 使用同一 signed 64-bit 范围，在 JavaScript、SQLite 和 JSON 中始终作为规范十进制字符串处理；
 - 禁止边界层隐式强制类型转换、二进制浮点业务运算和依赖设备时间排序跨设备事件。
 
 ## Decision details
@@ -183,9 +183,9 @@ SQLite 将 **scaled integer 的规范十进制文本** 存为 `TEXT`，例如领
 - 写入前验证 safe integer 和 UInt32 范围；达到上限时返回受保护的 `revision_exhausted` 错误并要求数据迁移，绝不回绕为 0；
 - Revision 只比较同一存储副本的同一实体，不能跨设备排序。
 
-#### 6.2 服务端版本与序列
+#### 6.2 Long counter
 
-`ServerVersion`、`ServerSequence`、账本序列、同步 generation 内的 long counter 使用非负 signed 64-bit 范围 `0...9223372036854775807`：
+`ServerVersion`、`ServerSequence`、账本序列、同步 generation，以及本地持久增长的 `controlSequence`、`dataMutationCounter`、`notificationDatasetEpoch` 都使用同一个 `LongCounter`：非负 signed 64-bit 范围 `0...9223372036854775807`。不得为后三者另建“无上限 exact unsigned”或平台 `UInt64` 语义。
 
 | 层 | 表示 |
 | --- | --- |
@@ -198,7 +198,8 @@ SQLite 将 **scaled integer 的规范十进制文本** 存为 `TEXT`，例如领
 - 比较/递增用 `ExactInteger`，不得转 JavaScript `number`；
 - SQLite 不依赖十进制 TEXT 字典序比较；同步 adapter 在内存精确比较，或使用经 ADR 明确的 fixed-width 派生编码；
 - cursor 是包含 generation/sequence 等内容的不透明、版本化 token，调用方不得解析后自行加一；
-- 达到 64-bit 上限前服务端必须通过新 schema/generation 迁移，绝不回绕或复用序列。
+- 所有递增先做 checked `+1`；达到上限时，普通业务写、snapshot capture、restore/manual rollback、control-slot activation 和 notification epoch 变更全部 fail closed，先执行受审迁移，绝不回绕、饱和、归零或复用；
+- 服务端 counter 在达到上限前通过新 schema/generation 迁移；本地 counter 的迁移必须在 Repository 开放前完成，并以 crash-safe candidate/control 协议验证。
 
 普通 UI 计数、数组长度和分页大小只有在文档硬上限远低于 `Number.MAX_SAFE_INTEGER` 时才用 `number`。任何会持久增长、跨设备或来自服务端大整数的计数都按 long counter 处理。
 
@@ -353,5 +354,6 @@ SQLite 自身能保存 signed 64-bit，但当前 JS bridge 会把值暴露为 `n
 
 | Date | Version | Change |
 | --- | --- | --- |
+| 2026-07-26 | v1.2 | 统一 controlSequence、dataMutationCounter、notificationDatasetEpoch 与同步/账本的 signed-64 LongCounter 范围和溢出门，并修正 TD-010 链接。 |
 | 2026-07-26 | v1.1 | 消除 Hermes 原生 BigInt 假设，固定客户端 ExactInteger/JSBI adapter，保持跨端编码不变。 |
 | 2026-07-26 | v1.0 | 固化跨端 ID、时间、精确十进制、排序键、版本/序列和 canonical encoding。 |
