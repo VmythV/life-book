@@ -98,16 +98,17 @@ interface NotificationPlatformPort {
 
 ```text
 posting:
-  denied | allowed | provisional
+  not_determined | denied | allowed | provisional
 
 presentation:
-  normal | noninterruptive | summary | channel_blocked | system_restricted
+  normal | noninterruptive | summary | channel_blocked |
+  system_restricted | unknown
 
 precision:
   exact | approximate | not_applicable
 ```
 
-- iOS `notDetermined` 在未请求前映射为 posting denied + 可请求原因；`authorized` 为 allowed；`provisional` 单列，不能写成正常打扰；`ephemeral` 仅在将来确有 App Clip 场景时支持，P0 不产生该状态；
+- iOS `notDetermined` 映射为 `not_determined`；`authorized` 为 allowed；`provisional` 单列，不能写成正常打扰；`ephemeral` 仅在将来确有 App Clip 场景时支持，P0 不产生该状态；
 - Android 13+ posting 来自通知运行时权限，并结合用户提醒 channel 是否可用；更低版本仍需读取 App/channel 状态，不能按系统版本假设 allowed；
 - Android `precision` 每轮通过 `canScheduleExactAlarms()` 查询；iOS 为 `not_applicable`，不能把它显示成“保证精确”；
 - Focus、摘要、勿扰、厂商省电等无法完整获知时使用最保守可说明状态，不伪造 normal；
@@ -115,6 +116,18 @@ precision:
 - 一次对账使用固定快照。执行期间能力 generation 变化时放弃最终水位并重新入队。
 
 用户界面把三个维度分别解释为“能否发布”“可能怎样呈现”“Android 时间精度”，不能折叠为绿色的“通知正常”。
+
+对账执行分支固定为：
+
+| posting / presentation | 平台动作 | 领域与界面结果 |
+| --- | --- | --- |
+| `not_determined` | 不提交；定向取消可能由恢复/旧版本留下的 managed 请求；后台不请求权限。 | 计划保持 planned，显示“尚未允许”；只有用户正在保存真实提醒并继续说明流程时才可请求。 |
+| `denied` | 不提交；定向取消当前 managed 请求。 | 计划保持 planned，显示“需开启通知”和设置入口；权限变化后只重挂未来目标。 |
+| `allowed/provisional` + `channel_blocked` | Android 不提交并定向取消该 channel 的 managed 请求。 | 计划保持 planned，显示“提醒渠道已关闭”和设置入口。 |
+| `provisional` + 其他状态 | iOS 可提交普通一次性请求。 | 明确标为非打扰/可能静默呈现；P0 不主动请求 provisional。 |
+| `allowed` + `normal/noninterruptive/summary/system_restricted/unknown` | 按 precision 分支提交；系统控制的呈现状态不改时间。 | 保存实际能力说明；`unknown` 不显示正常保证。 |
+
+取消只作用于项目 managed ID，不删除 ReminderInstance。`precision = approximate` 使用近似 adapter；`exact` 使用 exact adapter；`not_applicable` 只适用于 iOS。能力组合非法或未知枚举时停止新增提交、保留计划并进入可诊断状态，不猜测更宽松能力。
 
 ### 4. 稳定请求身份和指纹
 
@@ -228,17 +241,18 @@ iOS/Android 系统本身保存通知请求是系统功能的必要副本，无�
    capability snapshot and environment generation
 3. read valid plans/sources and compute desired instances for [now, now + 30 days]
 4. filter past, terminal, paused, cancelled, invalid and unauthorized sources
-5. select ordinary requests and reserve slots by REM-092
-6. derive requestId and scheduleFingerprint for each selected request
-7. list managed pending/registry
-8. cancel invalid, unauthorized and privacy-tightening requests first
-9. upsert missing or fingerprint-changed desired requests
-10. if environment generation requires rebuild, force re-arm every desired request
-11. cancel remaining undesired managed requests; never global cancel-all in normal reconcile
-12. dismiss obsolete delivered sensitive/deleted/unauthorized requests where supported
-13. persist NotificationDelivery receipts, capability evidence and scheduled-through watermark
-14. if domain revision, environment generation or relevant settings changed, enqueue rerun
-15. release lease
+5. apply the capability decision table; retain domain plans even when platform set is empty
+6. select ordinary requests and reserve slots by REM-092
+7. derive requestId and scheduleFingerprint for each selected request
+8. list managed pending/registry and the latest local attempt for every request ID
+9. cancel invalid, unauthorized and privacy-tightening requests first
+10. upsert requests without sufficient current success evidence
+11. if environment generation requires rebuild, force re-arm every desired request
+12. cancel remaining undesired managed requests; never global cancel-all in normal reconcile
+13. dismiss obsolete delivered sensitive/deleted/unauthorized requests where supported
+14. persist NotificationDelivery receipts, capability evidence and scheduled-through watermark
+15. if domain revision, environment generation or relevant settings changed, enqueue rerun
+16. release lease
 ```
 
 平台调用永远不放在 SQLite transaction 内。每个外部动作前后写短事务 checkpoint；进程在任意一步终止后可以重复执行。任务 revision guard 保证旧任务不能把新编辑标记为已安排。
@@ -246,11 +260,13 @@ iOS/Android 系统本身保存通知请求是系统功能的必要副本，无�
 #### 8.1 差分和强制重挂
 
 - iOS `listManagedPending` 返回本 App 当前 pending，可按 request ID/fingerprint adapter metadata 做差；
-- Android 返回 Expo registry，只能证明 adapter 曾登记，不能证明 AlarmManager 仍有闹钟。投递状态仍可记 `accepted`，但证据必须为 `registry_only`，界面不能声称“系统队列已确认”；
+- Android 返回 Expo registry，只能证明 adapter 曾登记，不能证明 AlarmManager 仍有闹钟。投递状态仍可记 `accepted`，但证据必须为 `android_registry_only`，界面不能声称“系统队列已确认”；
+- 当前 Expo Android 路径可能先写 registry、再调用 AlarmManager。Android 只有同时满足“registry 中 request/fingerprint 匹配”和“最新 attempt 是同 fingerprint、precision、capability/environment generation 的 `accepted` 成功回执”时才允许跳过 upsert；单独 registry 条目永远不产生 `accepted`；
+- 每次外部提交前先以递增 attempt sequence 写 `requested` checkpoint，AlarmManager/adapter 正常返回后才写 `accepted`。最新 attempt 为 `requested`、`rejected`、`missing`、`cancelled`，或没有对应成功回执时，一律同 ID 重挂；不能回退采用更早的 accepted；
 - Android 在 boot、App/Expo 升级、恢复检测、time/timezone change、exact capability/environment generation 变化后，忽略 registry 的“存在”结论，对全部 selected desired 执行同 ID re-arm；
 - exact 权限撤销可能直接停止 App、删除 exact alarms 且没有可依赖的撤销回调。下一次系统允许 App 运行时重新查询 capability，转 approximate 并强制重挂；不得承诺撤销瞬间自动恢复；
 - exact 权限授予广播只标记 generation；receiver 不直接读取数据库或安排内容；
-- schedule 成功而投递记录写入前崩溃时，同 ID 重试；投递记录写入而平台调用失败时，下一轮 registry/pending/fingerprint 会收敛；
+- schedule 成功而 accepted 回执写入前崩溃时，最新 attempt 仍为 requested，下一轮同 ID 重试；registry 已写而 AlarmManager 失败/进程终止时也因缺少当前成功回执重试；
 - 不在正常对账使用平台全量 cancel，因为这会扩大隐私清理失败和调度空窗；清除本机等明确不可逆流程除外。
 
 #### 8.2 预算
@@ -336,7 +352,7 @@ adapterContractVersion
 environmentGeneration
 ```
 
-具体物理表由持久化 Schema 文档定义。领域 `ReminderInstance.state = scheduled` 仅表示当前设备存在一次成功的提交意图和未被后续事实否定，不表示展示或用户已读。Android approximate、registry-only、等待权限、预算不足和失败分别映射 REM-131 的可观察状态。
+具体物理表由持久化 Schema 文档定义。`ReminderInstance.state` 是收件人范围内的逻辑生命周期，不保存“本设备正常”。P0 只有一个 installation 时，当前非失效 delivery accepted 后可进入 scheduled；P1 同一实例跨多个 Device 共享，至少一个当前适用设备存在 accepted delivery 时才可聚合为 scheduled，单台设备失败不能把共享实例改成 failed。每台设备的已安排、近似、等待权限、registry-only、预算不足和失败状态始终从该设备 `NotificationDelivery` 派生；accepted 不表示展示或用户已读。
 
 `scheduledThrough` 必须同时带 platform、预算、能力 generation、tzdb/recurrence version 和完成时间；任一输入变化即失效。诊断只输出随机/不透明 ID、时间、稳定错误、能力和水位，不输出 title/body/payload 或 Expo registry 原文。
 
@@ -492,4 +508,5 @@ exact 权限不可用、channel 被关闭或平台行为不确定时自动回落
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-26 | 澄清权限能力决策表、Android registry 与同代成功回执双重判断、崩溃后强制重试，以及 P1 共享实例和设备投递的状态边界。 |
 | 2026-07-26 | 接受 Expo Notifications + 自有端口 + 薄环境原生模块；固定一次性滚动调度、稳定身份、预算、Android registry 证据、强制重挂、动作 inbox 与隐私边界。 |
