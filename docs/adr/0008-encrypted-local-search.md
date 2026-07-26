@@ -5,7 +5,7 @@
 > Decision owners：客户端数据负责人、搜索负责人、安全负责人  
 > Scope：P0 移动端离线搜索，兼容 P1/P2 空间权限、同步重建和字段扩展  
 > Related requirements：PR-400～403、SRCH-001～101、DOM-001～002、BR-020～021、QR-011、QR-020、QR-022、QR-030、QR-070～071、QR-090～091、QR-100～101  
-> Related ADRs：[TD-002](0002-offline-first-client-architecture.md)、[TD-003](0003-encrypted-local-database.md)、[TD-006](0006-cross-platform-scalar-representations.md)、[TD-010](0010-snapshot-schema-and-migrations.md)、[TD-012](0012-local-persistence-schema.md)  
+> Related ADRs：[TD-002](0002-offline-first-client-architecture.md)、[TD-003](0003-encrypted-local-database.md)、[TD-006](0006-cross-platform-scalar-representations.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、[持久化 Schema](../persistence-schema.md)
 > Decision gate：目标 SQLCipher build 的 FTS 能力探测、Expo 关闭连接缺陷规避、双槽崩溃恢复、安全删除、敏感竞态和设计容量真机基准全部通过后，才允许搜索进入公开构建
 
 ## Context
@@ -27,7 +27,7 @@
 - 一条根记录对应一个 SearchDocument，清单项目是带 part identity 的嵌套内容，结果始终折叠为根记录；
 - FTS 使用 `content=''`、`contentless_delete=1`、`detail=full`、`columnsize=1`；原文仍只在权威表，UI 片段从权威字段生成；
 - 索引采用 A/B 双槽。后台在 inactive slot 分页构建、追平变更、校验后用短事务原子切换；失败只丢弃 inactive slot；
-- 每次领域提交在同一事务写幂等 `RebuildSearchDocument(entityId,targetRevision)` 任务并推进 mutation counter；任务从权威聚合重建当前文档，旧任务不能覆盖新 revision；
+- 每次影响搜索的领域提交在同一事务写幂等 `RebuildSearchDocument(entityId,targetRevision)` 任务并推进搜索专用 source counter；任务从权威聚合重建当前文档，旧任务不能覆盖新 revision；该 counter 与 TD-010 全局数据 mutation counter 不得混用；
 - 每次命中返回前重新读取权威记录并检查空间、membership、生命周期、敏感和应用锁；FTS 命中从来不是授权；
 - SQLite 核心与每张 FTS 表分别启用 secure-delete，并对 Expo/SQLite 的编译能力和已知 FTS 关闭缺陷设置 release gate。
 
@@ -38,7 +38,8 @@
 ```text
 Domain transaction
   ├─ writes authoritative aggregate
-  ├─ increments searchMutationCounter
+  ├─ increments dataMutationCounter (TD-010, every authoritative write)
+  ├─ increments searchSourceMutationCounter (only SRCH-080 source change)
   └─ enqueues RebuildSearchDocument(id, targetRevision)
                          │
                          ▼
@@ -67,7 +68,7 @@ Domain transaction
 
 ### 2. 物理投影
 
-TD-012 固化具体 DDL；逻辑表和约束如下。所有表位于 SQLCipher 主库并跟随同一 key、事务、备份/恢复边界。
+[持久化 Schema](../persistence-schema.md)固化具体 DDL；逻辑表和约束如下。搜索表只在当前 active generation 的 SQLCipher 数据库内共享业务连接、key 和领域任务事务，不因此进入用户 portable 备份边界。TD-010 current-device capture/本地 rollback checkpoint 可以物理克隆它们；portable projector 必须排除全部搜索对象。
 
 #### 2.1 元数据和文档
 
@@ -80,8 +81,8 @@ indexSchemaVersion
 normalizationVersion
 unicodeDataVersion
 rankingVersion
-sourceMutationCounter
-indexedMutationCounter
+searchSourceMutationCounter
+searchIndexedMutationCounter
 buildingSlot?
 buildingStartedAt?
 lastVerifiedAt?
@@ -111,6 +112,8 @@ indexedAt INTEGER NOT NULL
 - `titleCompactKey` 仅用于型号的字母数字 compact variant；
 - lifecycle/sensitivity 字段用于先减少候选，但不能替代最终权威检查；
 - manifest 只保存 field/part ID、规范化范围、variant 和重建信息，不保存另一份用户原文。
+
+`activeSlot` 只表示 Search Projection 槽，`indexGeneration` 只表示该投影的 A/B 代次；TD-010 的数据集身份只能写作 `datasetGenerationId`。接口、日志、cursor 和状态机禁止使用无前缀的 `generation` 指代二者。
 
 #### 2.2 FTS 长 token 索引
 
@@ -163,6 +166,10 @@ INDEX (docRowId)
 - 文档替换先按 docRowId 清旧 grams 再分批插入新集合，和 FTS/doc revision 在同一 slot 更新事务；
 - 单个 100,000 码点字段必须流式/分块产生 gram batch，不一次构造巨大 JS 数组；
 - 索引体积和写放大纳入 QR-020。若真机设计容量不达标，必须用新 ADR 评估预分词 contentless FTS/原生 tokenizer，不能静默取消短词语义。
+
+#### 2.4 Portable 分类
+
+`search_index_meta`、两槽 document/FTS/short-gram、part manifest、search task/cursor/session/dirty set 及其 payload 字段全部分类为 `derived | device_only`。若 search task 复用通用任务表，必须按 task kind 和 payload 每个字段覆盖分类。portable SQLCipher schema 不创建这些对象；任何搜索表、normalized 内容、FTS/virtual table、slot/meta/counter/task 进入 TD-010 projector 都是 release failure。
 
 ### 3. 字段映射
 
@@ -218,8 +225,8 @@ INDEX (docRowId)
 任何 SRCH-080 变化在领域事务内：
 
 1. 修改权威聚合并得到新 revision；
-2. 递增 `sourceMutationCounter`；
-3. 幂等 upsert `RebuildSearchDocument(entityId, targetRevision, mutationCounter)`；
+2. 递增 `searchSourceMutationCounter`；同一权威事务仍由 TD-010/Persistence 独立递增 `dataMutationCounter`；
+3. 幂等 upsert `RebuildSearchDocument(entityId, targetRevision, searchSourceMutationCounter)`；
 4. 若 permanent purge，任务类型仍由 handler 从“实体不存在”推导删除，不能携带旧内容；
 5. 提交后由 task runner 执行，失败不回滚已保存记录。
 
@@ -233,7 +240,9 @@ Task payload 只有 ID、revision、counter 和原因 enum，不含标题、正�
 - 正常时完整生成一个新 SearchDocument，以 slot 内 `entityRevision <= incomingRevision` 条件替换；
 - active slot 必写；若 meta 有 building slot，也写 building，避免构建期丢变更；
 - 同一 task 重放任意次数结果一致；旧 builder/page/task 不得覆盖更新 revision；
-- 成功写完所有目标 slot 才把 task acknowledged，并推进可证明连续的 `indexedMutationCounter`。
+- 成功写完所有目标 slot 才把 task acknowledged，并推进可证明连续的 `searchIndexedMutationCounter`。
+
+`dataMutationCounter` 绑定 TD-010 capture/preview/activation，覆盖所有权威领域事务；`searchSourceMutationCounter/searchIndexedMutationCounter` 只覆盖 SRCH-080 投影任务。任何一方都不能用另一方的相等性证明自己的 barrier。
 
 #### 5.3 刚保存补偿
 
@@ -246,19 +255,23 @@ Task payload 只有 ID、revision、counter 和原因 enum，不含标题、正�
 
 ### 6. A/B 双槽重建
 
-触发条件：首次建库、indexSchema/normalization/ranking 所需 feature 变化、恢复/导入、完整性失败或手动修复。
+触发条件：首次建库、indexSchema/normalization/ranking 所需 feature 变化、TD-010/011 已认证 portable 数据复制到 fresh candidate 后、完整性失败或手动修复。不得从用户 portable DB 读取、迁移或执行任何 FTS/search object。
 
-1. 在短事务选择 inactive slot，清空/重建其固定 DDL，记录 building versions 与起始 mutation counter；active 继续服务；
+1. 在短事务选择 inactive slot，清空/重建其固定 DDL，记录 building versions 与起始 `searchSourceMutationCounter`；active 继续服务；
 2. 按 EntityId keyset 分页读取可搜索根记录，每批构建 SearchDocument；不得把 50,000/250,000 对象一次装进内存；
 3. 每次 upsert 带 revision guard；同时发生的新 task 双写，旧 builder page 不会覆盖；
-4. 完成基线扫描后反复处理 `mutationCounter > buildStart` 的任务，直到 building slot 追平；
+4. 完成基线扫描后反复处理 `searchSourceMutationCounter > buildStart` 的任务，直到 building slot 追平；
 5. 执行 FTS `integrity-check` 和领域覆盖校验；等待所有不大于候选 barrier 的 search task 完成；
-6. 在 exclusive 短事务再次确认 source counter 未变化、building indexed counter 相等、版本/health 正确，然后只更新 `activeSlot/indexGeneration`；
-7. 新查询使用新 generation；已有 cursor 明确过期。旧 slot 等进程内 query lease 归零后后台清理；
+6. 在 exclusive 短事务再次确认 search source counter 未变化、building indexed counter 相等、版本/health 正确，然后只更新 `activeSlot/indexGeneration`；
+7. 新查询使用新 `indexGeneration`；已有 cursor 明确过期。旧 slot 等进程内 query lease 归零后后台清理；
 8. 任一步 crash 后依据 meta 恢复或丢弃 building slot，active slot 始终保持可读；
 9. 低磁盘时先删除失效 inactive projection/可重建 cache，再重试；绝不删除领域数据。若 active 也不可用，显示 partial/repair 状态。
 
 Contentless table 不依赖 FTS `rebuild` 命令；全量重建由上述应用双槽流程完成。
+
+普通 database migration 通过 TD-010 artifact `kind=projection_reset` 管理搜索：schema/normalizer/ranker/FTS format 不兼容时，candidate 清空 clone 中旧 projection/旧 search task，写入不含内容的 `RebuildAllSearchProjection(datasetGenerationId,indexSchemaVersion,normalizationVersion,rankingVersion)`；无影响时也必须通过版本/fingerprint/integrity gate。portable restore、manual rollback 和逻辑 dataset replacement 总是从空 search meta/task 开始，绝不复活来源 generation 的 search counter、outbox、cursor 或 projection。
+
+candidate 在 activation 前只持久化幂等全量重建任务，不要求索引完成。activation 后 worker 只能从新 active Repository 读取；重建失败显示 `building | partial` 并重试，不回滚已经验证的业务数据。
 
 ### 7. 查询编译
 
@@ -311,8 +324,8 @@ entityId ASC
 #### 8.2 Cursor/session
 
 - 首批 ≤ 30，后续页 ≤ 50，使用上述完整 tuple + EntityId keyset，不用裸 offset；
-- cursor 是进程内 opaque session nonce + generation/mutationCounter/rankingVersion + last tuple，不含 query/token；normalized query 只在已解锁内存 session；
-- 每页前核对 generation、source mutation counter、锁和 filter permission；变化时返回 `search_snapshot_expired` 并让 UI 保留查询后刷新；
+- cursor 是进程内 opaque `sessionNonce + datasetGenerationId + indexGeneration + searchSourceMutationCounter + rankingVersion + lastTuple`，不含 query/token；normalized query 只在已解锁内存 session；
+- 每页前同时核对 dataset generation、index generation、search source counter、锁和 filter permission；任一变化返回 `search_snapshot_expired` 并让 UI 保留查询后刷新；
 - App 重启/锁定/切空间立即销毁 session，cursor 无效；
 - 不能为了稳定分页长期持有 SQLite read transaction/WAL snapshot。
 
@@ -347,7 +360,7 @@ P1 服务端再次鉴权，不能接受客户端传入“允许 entity IDs”作
 - 每张 FTS table 建立后执行 `INSERT INTO ft(ft, rank) VALUES('secure-delete', 1)` 等价配置；SQLite 核心 secure_delete 不能替代 FTS 自己的 term 删除；
 - FTS secure-delete 要求 SQLite ≥ 3.42.0，并使索引格式不能被更旧 FTS5 读取；最低回滚/恢复版本必须在 migration manifest 声明；
 - purge/字段移除后及时删除 SearchDocument、FTS row 和 grams；后续 WAL checkpoint/VACUUM 遵循 TD-003/数据生命周期，不承诺闪存物理覆写；
-- 搜索索引不进入单独系统备份；整库备份/恢复按 TD-011 重建策略声明是否携带，不能产生明文词表。
+- 搜索索引不进入系统自动备份或 `.lifebook` portable snapshot；TD-010 从 fresh current-schema candidate 的签名空 DDL 和全量重建任务恢复搜索，没有“声明是否携带”的格式选项，也不能产生明文词表。
 
 #### 10.2 合并与完整性
 
@@ -378,11 +391,12 @@ PRAGMA compile_options
 
 规避规则：
 
-- P0 采用 TD-003 长生命周期单序列化连接；
+- P0 只在同一 active dataset generation 的普通前后台生命周期采用 TD-003 长生命周期单序列化连接；
 - 所有 statement 在 `finally` 显式 finalize；关闭前停止并等待 search task/query；
+- TD-010 DatasetGate 准备 activation 时，立即使全部 cursor 过期，取消并 join query/index worker，finalize statement、关闭 cursor、清 session/dirty set，再关闭 active DB handle；任一步失败都阻止 control switch，不能以“长连接”跳过；
 - 受影响版本可使用 Expo 已记录的关闭配置 workaround 或纳入受控 fork，但必须由双平台反复 open→FTS→lock/background→close 压测决定；
 - 不在正常后台/前台切换频繁关闭数据库；
-- 依赖升级必须重跑关闭、WAL、SQLCipher、FTS、备份和迁移矩阵。
+- 目标 Expo/受控 fork 若不能稳定完成 activation close 序列，则 migration/restore activation 和搜索能力不能进入 release；依赖升级必须重跑关闭、WAL、SQLCipher、FTS、备份和迁移矩阵。
 
 ## Alternatives considered
 
@@ -422,7 +436,7 @@ PRAGMA compile_options
 - 标题 exact/prefix 的产品排名不受 BM25 统计波动影响；
 - 索引与领域事实分离，任何失败、schema/Unicode 升级和恢复都能双槽重建；
 - 敏感/权限/生命周期在权威边界复核，索引滞后不会直接泄露；
-- 同一 SQLCipher/事务/备份边界减少明文副本与跨库原子问题；
+- 同一 active SQLCipher/领域任务事务减少明文副本与跨库原子问题，同时 portable 备份按 derived 分类排除搜索；
 - Unicode、排名和 schema 独立版本，未来拼音/OCR/服务端搜索可以增加而不偷换 P0 语义。
 
 ### Negative
@@ -441,6 +455,7 @@ PRAGMA compile_options
 | FTS query language 注入 | 安全 AST + 唯一 renderer + allowlist；用户永不直达 MATCH。 |
 | 旧 task 覆盖新内容 | handler 重读权威；revision conditional upsert；双槽 task barrier。 |
 | 重建切换漏变更 | mutation counter、building 双写、追平 barrier、exclusive 原子 flip。 |
+| 搜索 counter 被当成数据集水位 | 字段名和所有权分离；TD-010 只用 `dataMutationCounter`，搜索只用 `search*MutationCounter`；独立 fixture。 |
 | stale index 泄露敏感/撤权数据 | 每个结果重新鉴权并在 query service 裁剪；锁屏销毁 session。 |
 | 短 gram 体积失控 | per-part 去重、批处理、空间预算/指标、设计容量门；失败则新 ADR。 |
 | FTS 删除仍残留旧 term | 核心 + FTS secure-delete、WAL 生命周期、forensic test。 |
@@ -456,10 +471,11 @@ PRAGMA compile_options
 - indexer 每批限定记录数、文本码点、gram rows、事务时间和取消点；不能在 JS heap 聚合全库；
 - 写 active/building slot 的一个文档必须原子；不允许 doc revision 已新而 FTS/gram 仍旧；
 - 搜索后台任务与普通写共享 TD-003 单连接队列，分批让出，不能持有长事务阻塞 200 ms 写入目标；
+- DatasetGate 取得后必须停止 old-generation worker、使 cursor 过期并清 session/dirty set；新 worker 只接受当前 `ActiveGenerationHandle`，不能跨 generation 续跑；
 - query 不返回任意 normalized text/manifest；DTO 先裁剪再离开 application boundary；
 - 不记录 query、token、片段、标题、敏感 EntityId 或 MATCH SQL；允许 token 数/结果数/耗时分桶、版本和错误码；
 - 远程配置只能暂停索引/调低批大小/隐藏有缺陷能力，不能提高硬上限、改变 normalization/ranking 或开启未建模字段；
-- schema/normalizer/ranker 版本与 migration/backup manifest 显式关联，旧 App 遇到新 FTS secure-delete 格式必须安全拒绝而非误读。
+- schema/normalizer/ranker 版本与 migration artifact、`projection_reset` 和 rebuild task 显式关联；portable manifest 至多声明 producer/read compatibility，不携带 projection。旧 App 遇到新 FTS secure-delete 格式必须安全拒绝而非误读。
 
 ## Verification
 
@@ -485,6 +501,8 @@ PRAGMA compile_options
 - task 创建/领取、active upsert、building upsert、ack 每个 kill point；重放 100 次结果不增长；
 - stale revision、实体 purge、分类/标签 fan-out、附件 rename、同步批量/restore/import；
 - 双槽 build 每页/追平/verify/flip/cleanup kill；始终有旧完整或新完整 active，不出现混合代；
+- dataset activation 前后强杀，全部 query/index handle 必须先关闭；旧 `datasetGenerationId` cursor/task/dirty item 在新 active 永久过期且不能写入；
+- portable fixture 的 table/column/task 分类证明不存在任何 search object；恢复后从空 meta 全量重建，失败只影响搜索可用性；
 - building 期间高频编辑同一实体，builder 旧 revision 不覆盖；mutation barrier 无漏 task；
 - 1% 边界的单体修复/全量重建、FTS corruption、低磁盘、asset/schema/version mismatch；
 - current-session dirty set 让刚保存内容立即可搜，达到 201 个时进入可解释 partial 且领域数据可见。
@@ -521,4 +539,5 @@ PRAGMA compile_options
 
 | Date | Version | Change |
 | --- | --- | --- |
+| 2026-07-26 | v1.1 | 对齐 TD-010：portable 永不携带搜索；分离数据集/索引 generation 与全局/搜索 counter；冻结 activation 关闭和 projection-reset 协议。 |
 | 2026-07-26 | v1.0 | 固化 SQLCipher 内 trigram + short-gram 混合索引、Unicode pipeline、A/B 重建、排名、安全和平台门。 |
