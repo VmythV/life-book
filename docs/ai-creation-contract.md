@@ -1,6 +1,6 @@
 # 生活有谱智能创建契约
 
-> 项目代号：`life-book` · 版本：v1.0 · 更新日期：2026-07-26 · 状态：智能能力基线
+> 项目代号：`life-book` · 版本：v1.1 · 更新日期：2026-07-26 · 状态：智能能力基线
 >
 > 权威范围：智能创建会话、供应商无关草稿语义、字段来源、校验、失败、数据边界和阶段扩展
 >
@@ -205,7 +205,6 @@ P0 请求不包含安装内其他记录、分类/标签列表、附件、联系�
 - `inferred_title`；
 - `inferred_low_stock_threshold`；
 - `past_reminder_omitted`；
-- `unsupported_recurrence_simplified`（P0 不允许直接确认，必须转 unsupported）；
 - `timezone_explicit`；
 - `large_generated_checklist`；
 - `sensitive_content_notice`；
@@ -258,11 +257,11 @@ P0 请求不包含安装内其他记录、分类/标签列表、附件、联系�
 
 - CommonDraft；
 - `startDate`；
-- `schedule`（全天或有时间）；
+- `schedule`（全天、浮动本地时间或时区绑定时间；重复规则不允许 instant）；
 - `recurrenceRule`；
-- 可选 `endCondition`，规范上属于 recurrenceRule；
 - P0 最多一个主 `reminderPlanDraft`；
-- 可选 `followUpPolicyDraft`，只有用户明确要求连续提醒时生成。
+- `reminderPlanDraft` 只允许 `at_schedule` 或 `relative_to_schedule`；
+- 可选 `followUpPolicyDraft` 属于该 `reminderPlanDraft`，只有用户明确要求连续提醒时生成，不能脱离提醒计划存在。
 
 规则：
 
@@ -280,7 +279,7 @@ P0 请求不包含安装内其他记录、分类/标签列表、附件、联系�
 - 可选分组数组；
 - 项目数组：标题、可选说明、可选数量/单位、可选分组引用；
 - 可选截止 ScheduleSpec；
-- P0 最多一个提醒计划。
+- P0 最多一个提醒计划，只允许 `at_schedule` 或 `relative_to_schedule`。
 
 规则：
 
@@ -296,7 +295,7 @@ P0 请求不包含安装内其他记录、分类/标签列表、附件、联系�
 
 - CommonDraft；
 - `body`；
-- 0 个或多个提醒计划。
+- 0 个或多个 `absolute_schedule` 提醒计划。
 
 规则：
 
@@ -316,7 +315,7 @@ P0 请求不包含安装内其他记录、分类/标签列表、附件、联系�
 - `dateValue`；
 - 可选 `startYear`；
 - `counterDisplay`；
-- 0 个或多个提醒计划。
+- 0 个或多个 `relative_to_schedule` 提醒计划；当天提醒用偏移 0 和明确本地时刻表达。
 
 规则：
 
@@ -341,7 +340,7 @@ P0 请求不包含安装内其他记录、分类/标签列表、附件、联系�
 
 - initialQuantity 必须明确或使用一次追问；不能默认猜 0 后隐藏。
 - unit 对有数量的物品必须明确或追问；纯整数“两个行李箱”可以根据量词建议“个”并标 inferred。
-- threshold 未明确时默认空；模型可以建议但必须标 inferred，确认前不得开启低库存提醒。
+- threshold 未明确时默认空；模型可以建议但必须标 inferred。确认 `lowStockThreshold` 即确认开启该物品的低库存判断与未来 `state_entered` 事件提醒，模型不另造 reminderPlanDraft。
 - 草稿只含期初数量，不含 StockTransaction；用户确认后由领域层原子创建 opening 流水。
 - 买入/使用语句若物品尚不存在，P0 只能创建新家庭物品及期初数量；不能查询并修改已有库存。
 
@@ -392,6 +391,7 @@ P0 请求不包含安装内其他记录、分类/标签列表、附件、联系�
 
 - 智能网关在返回前校验，防止无效内容占用客户端流程；
 - 客户端使用同一 Schema 和领域规则再次校验，不能信任服务端；
+- 两端 JSON Schema 校验器必须启用 Draft 2020-12 `format` 断言，并继续执行真实日历、IANA 时区和跨字段确定性校验；
 - 两端规则版本不兼容时返回 `client_upgrade_required`，不选择其中一端悄悄保存；
 - 最终保存始终调用正常领域命令，与手动表单使用同一规则。
 
@@ -704,4 +704,5 @@ P0 管理式智能创建的数据流：
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.1 | 2026-07-26 | 与机器 Schema 对齐记录类型、提醒来源、重复时间、催促归属、低库存事件提醒和格式校验边界。 |
 | v1.0 | 2026-07-26 | 定义 P0 智能会话、统一草稿、来源、五类字段、校验、确认、错误、供应商、数据处理及 P1/P2 扩展。 |
