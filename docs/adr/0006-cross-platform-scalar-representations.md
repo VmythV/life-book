@@ -21,7 +21,7 @@
 - `EntityId` 使用 CSPRNG 生成的 RFC 9562 UUIDv4，规范小写连字符文本；
 - `Instant` 在领域中表示 UTC 时间轴毫秒，SQLite 为 epoch milliseconds，JSON/备份为固定毫秒精度的 RFC 3339 UTC 文本；
 - `LocalDate`、`LocalTime` 和 `TimeZoneId` 独立保存，绝不靠 `Instant` 反推用户原意；
-- `ExactDecimal` 使用 3 位定标的整数语义，TypeScript 为 `bigint`，SQLite/JSON 为规范十进制文本；
+- `ExactDecimal` 使用 3 位定标的整数语义，客户端为精确整数 value object，SQLite/JSON 为规范十进制文本；
 - `SortKey` 使用 128-bit 无符号整数的 32 位小写十六进制编码，并以中点插入、必要时事务内重排；
 - 本地 `Revision` 限定在安全的 32-bit 正整数；服务端版本/序列使用 64-bit 范围，但在 JavaScript、SQLite 和 JSON 中始终作为规范十进制字符串处理；
 - 禁止边界层隐式强制类型转换、二进制浮点业务运算和依赖设备时间排序跨设备事件。
@@ -42,9 +42,11 @@ type SortKey = string & { readonly __brand: 'SortKey' };
 type Revision = number & { readonly __brand: 'Revision' };
 
 interface ExactDecimal {
-  readonly scaled: bigint;
+  readonly scaled: ExactInteger;
 }
 ```
+
+`ExactInteger` 是本项目的不透明精确整数端口，不等同于 ECMAScript 原生 `bigint`。P0 Hermes 客户端固定用 `jsbi@4.3.2` 实现；应用代码只调用项目封装的 parse/format/add/subtract/multiply/compare/divide/remainder，不直接 import JSBI，也不使用 `123n` literal。服务端可以在同一端口后使用原生 BigInt。替换实现不得改变任何 canonical encoding 或运算结果。
 
 这些示例是语义约束，不要求照抄类型名。最终实现必须满足：
 
@@ -131,7 +133,7 @@ display value = scaled integer / 1000
 
 - `scaled` 是 signed integer，绝对值最多 18 位；范围为 `-999999999999999999...999999999999999999`；
 - 对应可表示业务范围 `-999999999999999.999...999999999999999.999`；具体字段仍可施加非负、上限或符号业务约束；
-- TypeScript 使用 `bigint` 做加、减、比较和乘整数；禁止经 `number`/`parseFloat` 运算；
+- TypeScript 使用 `ExactInteger` 做加、减、比较和乘整数；P0 Hermes adapter 为 JSBI，禁止经 `number`/`parseFloat` 运算；
 - 除法、比例换算或相乘可能需要舍入时，调用者必须选择已命名的舍入模式，并由相应业务规则批准；P0 库存加减不发生隐式舍入；
 - 等值依据 `scaled`，因此 `1`、`1.0` 和 `1.000` 是同一个领域值，负零规范为零。
 
@@ -144,11 +146,11 @@ JSON/API/备份使用用户数值的规范十进制字符串：
 - 示例：`0`、`12`、`-0.125`、`999999999999999.999`；
 - 外部输入超过 3 位小数或 18 位 scaled 精度时拒绝，不静默四舍五入。
 
-SQLite 将 **scaled integer 的规范十进制文本** 存为 `TEXT`，例如领域值 `1.25` 存为 `"1250"`。这是有意选择：当前 Expo SQLite 的 JS bridge 没有 `bigint` bind 类型，把 64-bit 整数交给 JavaScript `number` 会在范围内丢精度。
+SQLite 将 **scaled integer 的规范十进制文本** 存为 `TEXT`，例如领域值 `1.25` 存为 `"1250"`。这是有意选择：当前 Expo SQLite 的 JS bridge 没有精确大整数 bind 类型，把 64-bit 整数交给 JavaScript `number` 会在范围内丢精度。
 
 - 从 DB 读写都用严格 signed-integer text parser/formatter；`0` 是唯一零表示，无 `+` 和前导零；
 - 不在 SQL 中 `CAST(... AS INTEGER/REAL)`，不依赖 TEXT 字典序做数值排序或范围比较；
-- 权威业务计算在 application/domain 的 `bigint` 中完成，并在同一事务写回；
+- 权威业务计算在 application/domain 的 `ExactInteger` 中完成，并在同一事务写回；
 - 若查询确需排序/筛选，物理 schema 可添加由受控 adapter 维护的 fixed-width sortable encoding 或业务派生列，但必须有重建校验，不能成为第二份业务事实；
 - 服务端使用 `NUMERIC(18,3)`，API 仍使用规范字符串，不能因数据库支持 decimal 就向 JSON 输出 number。
 
@@ -157,7 +159,7 @@ SQLite 将 **scaled integer 的规范十进制文本** 存为 `TEXT`，例如领
 #### 5.1 编码和比较
 
 - 逻辑值是 `0...2^128-1` 的无符号整数；持久化/交换为恰好 32 位小写十六进制 ASCII；
-- SQLite 使用 `TEXT COLLATE BINARY`，TypeScript parser 转为 `bigint` 计算；规范字符串字典序与数值序一致；
+- SQLite 使用 `TEXT COLLATE BINARY`，TypeScript parser 转为 `ExactInteger` 计算；规范字符串字典序与数值序一致；
 - `00000000000000000000000000000000` 和 `ffffffffffffffffffffffffffffffff` 是保留边界，不分配给普通项；
 - 同一列表稳定排序为 `(sortKey ASC, id ASC)`；即使异常/并发产生相同 key，结果仍确定；
 - SortKey 只在其拥有者列表内有意义，不作为时间、全局顺序或用户可见编号。
@@ -187,18 +189,18 @@ SQLite 将 **scaled integer 的规范十进制文本** 存为 `TEXT`，例如领
 
 | 层 | 表示 |
 | --- | --- |
-| TypeScript domain | `bigint` 或不透明 decimal-string value object |
+| TypeScript domain | `ExactInteger`/不透明 decimal-string value object；Hermes 由 JSBI 实现 |
 | SQLite | 规范非负十进制 `TEXT` |
 | JSON/API/backup | 规范非负十进制字符串 |
 | PostgreSQL | `bigint`，写出前做范围校验 |
 
 - 唯一零表示为 `"0"`；正数无前导零、加号、小数或指数；
-- 比较/递增用 `bigint`，不得转 JavaScript `number`；
+- 比较/递增用 `ExactInteger`，不得转 JavaScript `number`；
 - SQLite 不依赖十进制 TEXT 字典序比较；同步 adapter 在内存精确比较，或使用经 ADR 明确的 fixed-width 派生编码；
 - cursor 是包含 generation/sequence 等内容的不透明、版本化 token，调用方不得解析后自行加一；
 - 达到 64-bit 上限前服务端必须通过新 schema/generation 迁移，绝不回绕或复用序列。
 
-普通 UI 计数、数组长度和分页大小只有在文档硬上限远低于 `Number.MAX_SAFE_INTEGER` 时才用 `number`。任何会持久增长、跨设备或来自服务端 bigint 的计数都按 long counter 处理。
+普通 UI 计数、数组长度和分页大小只有在文档硬上限远低于 `Number.MAX_SAFE_INTEGER` 时才用 `number`。任何会持久增长、跨设备或来自服务端大整数的计数都按 long counter 处理。
 
 ### 7. JSON、SQLite 与文本通则
 
@@ -238,7 +240,7 @@ SQLite 将 **scaled integer 的规范十进制文本** 存为 `TEXT`，例如领
 
 ### SQLite INTEGER 保存 scaled decimal
 
-SQLite 自身能保存 signed 64-bit，但当前 JS bridge 会把值暴露为 `number`，18 位 scaled 值可能在到达 `bigint` parser 前已损坏。TEXT 多一次解析但能端到端保真；接受该成本。
+SQLite 自身能保存 signed 64-bit，但当前 JS bridge 会把值暴露为 `number`，18 位 scaled 值可能在到达精确整数 parser 前已损坏。TEXT 多一次解析但能端到端保真；接受该成本。
 
 ### 所有时间都保存 ISO 字符串
 
@@ -269,7 +271,7 @@ SQLite 自身能保存 signed 64-bit，但当前 JS bridge 会把值暴露为 `n
 ### Negative
 
 - adapter 和 branded type 增加代码量，开发者不能直接操作裸 JSON；
-- ExactDecimal、服务端 long 和 SortKey 需要 `bigint`/字符串转换，SQL 聚合与排序不能直接套用；
+- ExactDecimal、服务端 long 和 SortKey 需要 ExactInteger/字符串转换，SQL 聚合与排序不能直接套用；
 - UUIDv4/固定 SortKey 的数据库索引局部性不如时间有序 ID；
 - schema 需要少量派生列与一致性重建机制支持复杂查询；
 - 固定 canonical 格式要求旧版导入有单独宽松 parser，不能复用运行时入口。
@@ -279,20 +281,23 @@ SQLite 自身能保存 signed 64-bit，但当前 JS bridge 会把值暴露为 `n
 | 风险 | 缓解 |
 | --- | --- |
 | 代码绕过 value object 直接用裸值 | 禁止不安全 cast；lint/代码评审检查 adapter；domain API 只收品牌类型。 |
-| `bigint` 被 JSON.stringify 或原生 bridge 错误处理 | DTO 先显式转规范字符串；跨桥 contract test；禁止通用 stringify 领域对象。 |
+| ExactInteger/JSBI 被 JSON.stringify 或原生 bridge 错误处理 | DTO 先显式转规范字符串；跨桥 contract test；禁止通用 stringify 领域对象。 |
 | epoch 单位秒/毫秒混淆 | 类型名带 `Ms`；范围检查；固定 fixture；接口字段文档明确格式。 |
 | 本地日期经 `Date` 自动转区 | LocalDate parser/日历库独立；禁止裸 `new Date(localDate)` 规则。 |
 | decimal TEXT 被 SQL 当数值/字典序排序 | repository query 白名单；禁止 CAST；需要时用可重建派生列。 |
 | SortKey 高频同位置插入导致重排 | 128-bit 空间；监控重排次数/规模；事务算法和服务端邻居意图。 |
 | UUID 实现随机源退化 | 使用平台 CSPRNG；启动/测试检查格式；固定依赖和真机测试。 |
 | tzdb alias/升级改变解析 | TD-007 固定 tzdb 版本、历史解析结果与升级测试。 |
-| 64-bit sequence 超 JS 安全整数 | 全链路字符串/`bigint`；极值 fixture；静态禁止 `Number(serverSequence)`。 |
+| 64-bit sequence 超 JS 安全整数 | 全链路字符串/ExactInteger；极值 fixture；静态禁止 `Number(serverSequence)`。 |
+| Hermes 没有原生 BigInt | P0 固定 JSBI adapter；release 真机测试；禁止 BigInt literal/直接能力探测分叉。 |
 
 ## Implementation constraints
 
 - 建立一个 `scalar` 核心包，导出 parser、formatter、比较器、范围常量和 fixture；UI/feature 不自行复制正则；
-- parser 必须线性处理且有输入长度上限，先验长度再做 BigInt/日期解析，防恶意超长数字；
-- `bigint` 运算不得经过原生模块不支持的桥类型；跨桥先转受版本化字符串/bytes；
+- parser 必须线性处理且有输入长度上限，先验长度再做 ExactInteger/日期解析，防恶意超长数字；
+- ExactInteger/JSBI object 不得经过原生 bridge、SQLite 或 JSON；跨边界先转受版本化字符串/bytes；
+- `scalar` 包是唯一可以 import `jsbi` 的业务包；lint 禁止其他包使用原生 BigInt literal、`BigInt(...)` 或直接 import JSBI；
+- 若未来目标 Hermes 支持原生 BigInt，必须先在双平台 release build 跑完整标量 fixture 和随机 differential，再替换 adapter；不能在同一 release 按设备动态选择两套实现；
 - SQLite schema 对 canonical TEXT 至少设置长度/字符形态 `CHECK`，但完整 UUID 日期合法性由应用 parser 和迁移审计负责；
 - API schema/OpenAPI 必须把 long/decimal 标成 string + pattern/example，不生成会转 number 的客户端类型；
 - 测试/fixture 时间使用固定 clock 和明确 TimeZoneId，不能依赖开发机 locale/时区；
@@ -320,7 +325,7 @@ SQLite 自身能保存 signed 64-bit，但当前 JS bridge 会把值暴露为 `n
 - 随机生成合法/非法标量，在所有平台得到相同接受/拒绝结果；
 - SQLite 写入、进程重启、读取、备份、恢复、API round-trip 后逐字段相等；
 - 模拟原生 bridge、JSON serializer 和 ORM，证明没有 long/decimal 隐式转 `number`；
-- decimal 流水随机加减后缓存等于从头 BigInt 重放，服务端 NUMERIC 结果一致；
+- decimal 流水随机加减后缓存等于从头 ExactInteger 重放，服务端 NUMERIC 结果一致；
 - SortKey 重排在任意 kill point 原子回滚或完整提交，不改变业务 revision/updatedAt；
 - 跨 DST 测试证明 LocalDate/LocalTime/TimeZoneId 分离，具体解析行为由 TD-007 fixture 验证；
 - 静态扫描禁止 `parseFloat` 处理 ExactDecimal、`Number(...)` 处理 long、裸 `Date` 解析 LocalDate。
@@ -328,7 +333,7 @@ SQLite 自身能保存 signed 64-bit，但当前 JS bridge 会把值暴露为 `n
 ## Rollout and rollback
 
 1. 在任何业务表 migration 前实现 scalar 包、跨端 fixture 和 SQLite adapter；
-2. 用小型 prototype 验证 Hermes `bigint`、Expo SQLite TEXT bind/read、原生桥和 release build；
+2. 用小型 prototype 验证 JSBI adapter 在 Hermes release build 的正确性/性能，以及 Expo SQLite TEXT bind/read 和原生桥；
 3. 首个 schema 直接写 v1 canonical encoding，不保留实验格式；
 4. 若 release 前发现实现不兼容，删除测试数据并更换未发布 schema；若已有用户数据，只能新增 scalar/schema version 并迁移；
 5. 回滚应用版本前验证旧客户端能读当前编码；不能让远端写出旧客户端会误读而非明确拒绝的新标量。
@@ -341,9 +346,12 @@ SQLite 自身能保存 signed 64-bit，但当前 JS bridge 会把值暴露为 `n
 - [Expo SQLite API](https://docs.expo.dev/versions/latest/sdk/sqlite/)
 - [SQLite Datatypes](https://www.sqlite.org/datatype3.html)
 - [ECMAScript BigInt specification](https://tc39.es/ecma262/multipage/numbers-and-dates.html#sec-bigint-objects)
+- [JSBI：pure-JavaScript BigInts](https://github.com/GoogleChromeLabs/jsbi)
+- [Hermes BigInt support status](https://github.com/facebook/hermes/issues/510)
 
 ## Revision history
 
 | Date | Version | Change |
 | --- | --- | --- |
+| 2026-07-26 | v1.1 | 消除 Hermes 原生 BigInt 假设，固定客户端 ExactInteger/JSBI adapter，保持跨端编码不变。 |
 | 2026-07-26 | v1.0 | 固化跨端 ID、时间、精确十进制、排序键、版本/序列和 canonical encoding。 |
