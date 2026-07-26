@@ -1,6 +1,6 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.2 · 更新日期：2026-07-26 · 状态：领域基线
+> 项目代号：`life-book` · 版本：v1.3 · 更新日期：2026-07-26 · 状态：领域基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
@@ -32,7 +32,9 @@
 | `TimeZoneId` | IANA 时区标识。 | 例如 `Asia/Shanghai`；不得用 `+08:00` 代替。 |
 | `ExactDecimal` | 不使用二进制浮点的十进制定点数。 | 最多 18 位有效数字、3 位小数；数量计算必须精确。 |
 | `SortKey` | 可在相邻对象间插入的稳定排序键。 | 只定义顺序，不向用户展示。 |
-| `Revision` | 单实体乐观并发版本。 | 正整数，从 1 开始；每次持久化业务改变递增。 |
+| `Revision` | 当前存储副本内的单实体乐观并发版本。 | 正整数，从 1 开始；每次本地持久化业务改变递增，不用于比较不同设备的先后。 |
+| `ServerVersion` | 服务端为一个同步实体确认的版本。 | 非负整数；0 表示尚未上传，服务端每次接受改变后单调递增。 |
+| `ServerSequence` | 服务端在一个空间内分配的变更顺序。 | 单调递增且不依赖设备时钟；只比较同一空间。 |
 | `ContentHash` | 内容完整性哈希。 | 用于附件、备份和同步校验，不作为加密。 |
 
 所有用户可见文本使用 Unicode。长度按 Unicode 码点校验；存储不得静默截断。
@@ -118,7 +120,7 @@ P0 初始化时分别生成当前安装和本地作者身份：
 | `id` | `EntityId` | 全局稳定。 |
 | `kind` | `personal \| family` | 创建后不可直接改变。 |
 | `name` | 文本 | P0 默认显示“个人空间”；家庭可自定义。 |
-| `ownerId` | `EntityId` | P0 指本地身份；账号后指账号或成员主体。 |
+| `ownerId` | `EntityId?` | personal 时必填，P0 指 LocalActor、认领后可指 Account；family 时为空，唯一 owner 由 active SpaceMembership 表达。 |
 | `status` | `active \| deleting \| deleted` | 个人空间不得进入 deleted；家庭删除按 P2 流程。 |
 | 公共元数据 | `EntityMeta` | 适用。 |
 
@@ -525,7 +527,91 @@ active ⇄ archived
 
 P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录在此基础上开放用户可见审计。
 
-### 16.2 未来同步字段
+### 16.2 `Account` 与 `AuthenticationIdentity`
+
+`Account` 是跨设备用户主体，不等于某次登录会话：
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `id` | `EntityId` | 服务端生成且永不复用。 |
+| `displayName` | 文本? | 1–80 个码点；家庭页面显示，不能作为鉴权。 |
+| `preferredLocale` | 地区语言? | 仅用于服务通知和默认显示。 |
+| `status` | `active \| deletion_pending \| deleted` | deletion_pending 只允许取消删除、导出和完成必要家庭交接。 |
+| `deletionScheduledFor` | `Instant?` | 与 status 同步存在。 |
+| 公共元数据 | `EntityMeta` | 服务端时间另行记录，不改写用户业务时间。 |
+
+认证凭据由 `AuthenticationIdentity` 独立保存：
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `accountId` | `EntityId` | 所属账号。 |
+| `method` | `email_otp \| passkey \| apple \| google` | P1 首期至少开放 email_otp；其他值按地区与商店配置。 |
+| `providerSubject` | 文本 | 供应商内稳定标识；与 method 组成唯一键。 |
+| `displayIdentifier` | 文本? | 经过验证的邮箱等；属于账号敏感资料，不进入业务日志。 |
+| `verifiedAt` | `Instant` | 只有验证完成后才能创建 active 会话。 |
+| `disabledAt` | `Instant?` | 禁用后不得签发新会话。 |
+
+一个 active 账号至少保留一种可用认证身份。添加或删除身份必须近期重新认证；认证提供商令牌不成为领域字段。
+
+### 16.3 `Device` 与 `AccountSession`
+
+`Installation` 代表一次本地安装；登录后服务端为该账号与安装建立 `Device`：
+
+| `Device` 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `id` | `EntityId` | 服务端设备登记 ID。 |
+| `accountId` | `EntityId` | 所属账号。 |
+| `installationId` | `EntityId` | 随机安装标识；同账号内唯一，不是硬件指纹。 |
+| `displayName` | 文本 | 默认由平台和用户可改名称组成，不含广告标识。 |
+| `platform` | `ios \| android \| web` | 受控值。 |
+| `status` | `active \| revoked` | revoked 不可恢复，重新登录产生新 Device。 |
+| `firstSeenAt`、`lastSeenAt` | `Instant` | 服务端观测时间，只用于安全与设备管理。 |
+| `revokedAt` | `Instant?` | 撤销完成时间。 |
+
+`AccountSession` 字段：
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `id`、`accountId`、`deviceId` | `EntityId` | 必须互相匹配。 |
+| `status` | `pending \| active \| expired \| revoked` | 终态不可重新激活。 |
+| `createdAt`、`expiresAt` | `Instant` | 短期访问令牌与可轮换会话分开实现。 |
+| `lastUsedAt`、`revokedAt` | `Instant?` | 服务端安全事件时间。 |
+| `authStrength` | 受控枚举 | 记录密码外验证/近期重新认证级别，不保存凭据。 |
+
+令牌、私钥和验证码不进入普通领域数据库、备份、同步或审计摘要。
+
+### 16.4 `DatasetBinding`
+
+`DatasetBinding` 是当前本地数据集与账号个人空间的设备内绑定，防止把退出后保留的数据误传给另一个账号：
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `localSpaceId` | `EntityId` | 当前数据集唯一默认个人空间。 |
+| `accountId` | `EntityId?` | bound/paused 时为其来源账号。 |
+| `remoteSpaceId` | `EntityId?` | 完成认领后与 localSpaceId 使用同一稳定 ID。 |
+| `state` | `unbound \| analyzing \| choice_required \| binding \| bound \| paused \| auth_required \| detaching` | 只有 bound 允许内容同步。 |
+| `provenanceAccountId` | `EntityId?` | 数据曾来自哪个账号；退出保留副本后仍保留，阻止跨账号静默认领。 |
+| `lastCompletedStep` | 受控枚举? | 崩溃后恢复认领，不代表业务数据已上传。 |
+| `bindingGeneration` | 正整数 | 每次认领/解绑尝试递增，丢弃迟到响应。 |
+
+认领只建立身份映射，不批量改写 Record 的 ID、createdByActorId 或历史 AuditEvent；LocalActor 通过 claimedByAccountId 解析为当前账号。选择“仅本机”时保持 unbound，已登录账号的云端个人空间不挂载为第二个本地默认个人空间。
+
+### 16.5 `SpaceMembership` 与 `Invitation`
+
+`SpaceMembership` 只用于账号空间；个人空间有且仅有所属账号一条 active membership，家庭空间规则由家庭规范定义：
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `spaceId`、`accountId` | `EntityId` | 组合唯一；服务端鉴权边界。 |
+| `role` | `owner \| member` | personal 固定 owner；家庭首期仅这两种。 |
+| `status` | `invited \| active \| leaving \| removing \| removed` | 只有 active 可以读取或写入空间。 |
+| `joinedAt`、`endedAt` | `Instant?` | 由服务端事务设置。 |
+| `invitedByAccountId` | `EntityId?` | 家庭邀请来源。 |
+| 公共元数据 | `EntityMeta` | 角色和状态变化产生服务端审计。 |
+
+`Invitation` 包含家庭空间、邀请者、目标角色、tokenHash、状态 `draft | active | accepted | revoked | expired`、过期时刻、接受账号和服务端时间。明文 token 只在创建时返回，不保存、不写日志；同一邀请最多接受一次。
+
+### 16.6 同步元数据
 
 所有可同步实体从 P0 起保留：
 
@@ -533,21 +619,61 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 - `spaceId`；
 - 创建/修改人；
 - 创建/修改时间；
-- 单实体 `revision`；
+- 当前副本内的 `revision`；
 - 回收站时间；
 - 可版本化枚举和扩展字段。
 
-P1 增加而不回填改变领域身份的基础实体：
+同步后每个实体另有 `serverVersion` 和最近确认的 `serverSequence`；它们不覆盖本地 revision 或用户时间。
 
-- `Account`：跨设备用户身份；
-- `Device`：可撤销客户端会话；
-- `SpaceMembership`：账号、空间和角色；
-- `Invitation`：有时效、一次性家庭邀请；
-- `SyncMutation`：本地待推送命令及幂等键；
-- `SyncCursor`：服务端增量读取位置；
-- `Tombstone`：永久删除后的最小同步标记。
+`SyncMutation` 是与领域写入同一事务产生的持久 outbox 项：
 
-同步和家庭字段详细语义由专项规范定义。
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `clientMutationId` | `EntityId` | 设备生成的服务端幂等键，永不复用。 |
+| `spaceId`、`entityType`、`entityId` | 标识 | 明确鉴权和目标。 |
+| `operation` | 受控命令 | 使用领域命令语义，不传任意 SQL/表 patch。 |
+| `baseServerVersion` | `ServerVersion` | 0 表示客户端认为实体尚不存在。 |
+| `payloadVersion` | 正整数 | 机器格式兼容版本。 |
+| `state` | `pending \| sending \| retry_wait \| acknowledged \| conflict \| rejected_forbidden \| rejected_version` | sending 崩溃后可安全回到 pending。 |
+| `attemptCount`、`nextAttemptAt` | 非负整数、`Instant?` | 受限指数退避。 |
+| `resultServerVersion`、`resultServerSequence` | 版本? | acknowledged 时必填。 |
+| `errorCode` | 受控码? | 不含用户内容。 |
+
+`SyncCursor` 每个设备、空间一条，保存最近完整应用的 `ServerSequence`、快照 generation 和更新时间。只有一页变化在本地事务中全部应用后才能推进；游标不是删除或备份时间。
+
+### 16.7 `SyncConflict`
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `id`、`spaceId`、`entityType`、`entityId` | 标识 | 指向仍可处理的目标。 |
+| `clientMutationId` | `EntityId` | 触发冲突的本地操作。 |
+| `baseServerVersion`、`remoteServerVersion` | `ServerVersion` | 冲突比较依据。 |
+| `fieldPaths` | 路径集合 | 只列冲突字段，不进入普通遥测。 |
+| `localSnapshotRef`、`remoteSnapshotRef` | 加密引用 | 只保留解决所需最小字段；受源记录敏感级别保护。 |
+| `state` | `unresolved \| resolved_local \| resolved_remote \| resolved_merged \| invalidated` | 解决会创建引用双方版本的新 mutation。 |
+| `createdAt`、`resolvedAt` | `Instant`、`Instant?` | 本地展示与清理依据。 |
+
+冲突对象不是第三份业务记录；解决或目标永久删除后按同步规范清理快照。服务端权限拒绝和墓碑优先不是可供用户覆盖的冲突。
+
+### 16.8 `Tombstone`
+
+永久删除同步实体后，服务端保存最小墓碑：
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `spaceId`、`entityType`、`entityId` | 标识 | 原 ID 永不复用。 |
+| `serverVersion`、`serverSequence` | 版本 | 使所有设备观察删除。 |
+| `purgedAt` | `Instant` | 服务端接受永久删除时间。 |
+| `retainUntil` | `Instant` | 同步安全期限；与 30 天业务回收站不同。 |
+| `reason` | `user_purge \| cascade \| account_deleted \| family_deleted` | 不含内容。 |
+
+墓碑到期后仍离线的设备必须通过新快照 generation 重建，不能把旧实体当新增上传。
+
+### 16.9 `AttachmentTransfer` 与云备份元数据
+
+`AttachmentTransfer` 包含 attachmentId、方向、内容哈希、总大小、已确认偏移/分块、状态 `queued | transferring | verifying | available | failed | cancelled`、重试信息和不含路径的错误码。附件元数据只有在内容完整验证并获得访问权限后才能对其他设备显示 available。
+
+`CloudBackup` 只保存恢复副本的管理元数据：accountId、可选 spaceId、备份 ID、创建设备、createdAt、formatVersion、schemaVersion、byteSize、contentHash、状态 `creating | available | deleting | deleted | failed` 和可选恢复 generation。备份内容、加密和恢复语义仍以数据生命周期与备份契约为准；CloudBackup 不携带 SyncCursor，也不冒充实时同步点。
 
 ## 17. 聚合事务边界
 
@@ -596,6 +722,22 @@ P1 增加而不回填改变领域身份的基础实体：
 
 旧客户端遇到未知记录类型、状态、操作或契约版本时不得按默认分支修改数据。应保留原始值、以只读或不可用状态展示，并要求升级或迁移。
 
+### DOM-087：跨设备顺序不使用设备时钟
+
+本地 revision 只保护当前副本，updatedAt 只表达用户设备记录的业务时间。跨设备并发必须使用 baseServerVersion、服务端版本和空间序列判断；不得以“时间更晚”静默覆盖另一设备。
+
+### DOM-088：认领不改写历史主体
+
+LocalActor 被 Account 认领后保留原 ID，既有 createdByActorId、updatedByActorId 和 AuditEvent 不批量改写。展示层通过 claimedByAccountId 解析身份；恢复、退出或再次登录不得把旧作者伪装成新账号。
+
+### DOM-089：服务端逐命令鉴权
+
+客户端缓存的 membership、当前空间或离线时获得的权限不是最终授权。服务端必须对每个 mutation 的账号、设备、active membership、空间、目标和操作重新校验；被移除后的离线写入拒绝，不能自动复制进个人空间。
+
+### DOM-090：墓碑优先
+
+永久删除墓碑优先于基于旧版本的创建、编辑、恢复或同步重试。任何自动合并都不得复活已永久删除 ID；合法重新创建必须获得新 ID。
+
 ## 19. 领域命令和结果
 
 领域层以显式命令改变数据，至少包括：
@@ -636,6 +778,7 @@ P1 增加而不回填改变领域身份的基础实体：
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.3 | 2026-07-26 | 完整定义账号、认证身份、设备会话、数据集绑定、成员关系、同步元数据、冲突、墓碑、附件传输和云备份逻辑实体。 |
 | v1.2 | 2026-07-26 | 在规则段保存重复引擎版本，保证备份、迁移和同步可以重现历史候选。 |
 | v1.1 | 2026-07-26 | 增加清单用途与低库存周期解决原因，以支持采购清单选择和归档/删除状态。 |
 | v1.0 | 2026-07-26 | 建立身份、空间、记录根、五种记录聚合、提醒、附件、库存、设置和同步扩展的统一逻辑模型与不变量。 |
