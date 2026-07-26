@@ -1,6 +1,6 @@
 # 生活有谱提醒与系统通知规范
 
-> 项目代号：`life-book` · 版本：v1.3 · 更新日期：2026-07-26 · 状态：提醒基线
+> 项目代号：`life-book` · 版本：v1.4 · 更新日期：2026-07-26 · 状态：提醒基线
 >
 > 权威范围：提醒计划、提醒实例、系统调度、通知动作、去重、权限、降级和可靠性边界
 >
@@ -69,11 +69,11 @@ P0 不允许一个计划同时含多个触发；多个提前提醒创建多个�
 ### REM-012：提醒实例状态
 
 ```text
-planned ──提交成功──→ scheduled ──用户动作──→ acknowledged
+planned ──收件人范围内至少一台设备接受──→ scheduled ──用户动作──→ acknowledged
    │                       ├──稍后──→ snoozed → 新 planned 实例
    │                       ├──来源失效──→ cancelled
    │                       ├──不再可操作──→ expired
-   │                       └──对账失败──→ failed → 可重试 planned
+   │                       └──范围内全部投递终态失败──→ failed → 可重试 planned
    ├──来源失效────────────→ cancelled
    └────────┐
 scheduled ──┴──空间/订阅暂停──→ paused ──恢复且仍在未来──→ planned
@@ -82,6 +82,9 @@ scheduled ──┴──空间/订阅暂停──→ paused ──恢复且仍�
 
 规则：
 
+- ReminderInstance 状态属于收件人范围内的逻辑生命周期，不表示“本设备通知正常”；每台设备的已安排、近似、等待权限、容量不足和失败只从该设备 NotificationDelivery 派生；
+- P0 当前 installation 有一个未失效 `accepted` delivery 时实例可进入 scheduled。P1 同一实例跨多个 Device 共享，至少一个当前适用设备有未失效 `accepted` delivery 时可聚合为 scheduled；单台设备失败不得把共享实例改成 failed；
+- 只有当前收件人范围内全部适用设备都出现不可重试的技术拒绝、且没有 accepted 或待重试投递时，实例才可进入 failed。权限未询问/拒绝、渠道关闭、预算不足和暂时无活跃设备仍保持 planned，并用设备投递/可观察原因解释；
 - `scheduledFor <= now` 且仍 scheduled 只表示“已经到时且未确认”，不是可可靠观测的 delivered 状态；
 - 收到前台通知回调可以记录 delivery observed，但不自动 acknowledged；
 - 用户从通知中心清除通知通常不可可靠观测，不得据此完成或确认业务；
@@ -103,7 +106,7 @@ scheduled ──┴──空间/订阅暂停──→ paused ──恢复且仍�
 | `rejected` | 平台拒绝，保存受控错误码。 |
 | `missing` | 本地期望存在，但平台可提供的 managed pending/登记证据中缺失。 |
 
-同一提醒实例可以有多个投递尝试；只有一个当前有效平台调度 ID。
+同一提醒实例可以有多个设备、每个设备可以有多个投递尝试；每个设备槽位只有一个当前有效平台调度 ID。投递同时记录 `scheduleFingerprint`、环境 generation 和证据类型；Android 的 registry 条目只能作为 `android_registry_only` 证据，不能单独证明 AlarmManager 接受。
 
 ## 3. 提醒来源与 P0 能力
 
@@ -428,7 +431,7 @@ P0 一律使用滚动窗口内的单次请求，不启用操作系统原生重�
 → 计算滚动窗口内期望实例
 → 按预算和预留选出期望请求
 → 生成稳定 request ID 与 schedule fingerprint
-→ 读取 iOS pending 或 Android adapter registry
+→ 读取 iOS pending 或 Android adapter registry，以及每个 request 的最新本地 attempt
 → 优先取消失效、失权和隐私收紧的旧请求
 → 提交缺失或 fingerprint 已改变的请求
 → 环境 generation 要求重建时强制重挂全部已选请求
@@ -440,6 +443,8 @@ P0 一律使用滚动窗口内的单次请求，不启用操作系统原生重�
 整个对账可重复执行。平台调用不位于数据库事务内，被中断后从可重放任务和短事务 checkpoint 继续，不以进程内列表作为进度，也不在正常对账调用全量取消。
 
 iOS pending 列表可作为当前待处理请求证据；Android 普通应用不能枚举 `AlarmManager` 的真实队列，Expo adapter registry 只证明曾登记。Android 在权限、重启、升级、时钟/时区或其他可能丢失真实闹钟的环境变化后必须强制重挂，不能因 registry 仍有条目而跳过。平台 API 返回成功只形成 `accepted`，不证明准时展示。
+
+Android 只有 registry 中 request/fingerprint 匹配，且最新 attempt 是相同 fingerprint、precision、capability/environment generation 的 `accepted` 成功回执时，才可跳过提交。每次平台调用前先写新的 `requested` attempt；最新 attempt 为 requested/rejected/missing/cancelled 或缺少当前成功回执时，即使 registry 有条目也必须同 ID 重挂，不能采用更早的 accepted。
 
 ### REM-102：内容变更重排
 
@@ -607,6 +612,7 @@ P1 远程推送用于：
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.4 | 2026-07-26 | 明确收件人范围逻辑状态与逐设备投递分离，并增加 Android registry 与同代成功回执的双重对账条件。 |
 | v1.3 | 2026-07-26 | 与 TD-009 统一一次性调度、低库存下个整分钟、快捷动作安全门、平台证据、权限撤销、总预算和强制重挂语义。 |
 | v1.2 | 2026-07-26 | 增加可恢复提醒暂停，统一家庭 membership 订阅、个人低库存确认和空间待删除对账。 |
 | v1.1 | 2026-07-26 | 增加账号多设备与家庭成员订阅的收件人范围，区分个人提醒动作和共享业务动作。 |
