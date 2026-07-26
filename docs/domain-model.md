@@ -1,6 +1,6 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.0 · 更新日期：2026-07-26 · 状态：领域基线
+> 项目代号：`life-book` · 版本：v1.1 · 更新日期：2026-07-26 · 状态：领域基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
@@ -298,6 +298,7 @@ active ⇄ archived
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
 | `recordId` | `EntityId` | 对应 `Record.type = checklist`。 |
+| `purpose` | `general \| shopping` | 默认 `general`；采购清单使用 `shopping`，普通清单可由用户明确选作采购目标但不自动改值。 |
 | `sourceTemplateId` | `EntityId?` | 仅用于来源说明，模板删除后可保留不透明来源 ID。 |
 | `sourceTemplateRevision` | `Revision?` | 创建时模板版本。 |
 | `dueSchedule` | `ScheduleSpec?` | 实例截止；模板没有绝对截止。 |
@@ -424,7 +425,8 @@ active ⇄ archived
 | `quantitySnapshot` | `ExactDecimal` | 进入时数量。 |
 | `notifiedAt` | `Instant?` | 首次主动提醒成功交给系统的时间。 |
 | `acknowledgedAt` | `Instant?` | 用户知道了或采取采购动作。 |
-| `resolvedAt` | `Instant?` | 数量恢复到当前阈值以上或阈值被移除。 |
+| `resolvedAt` | `Instant?` | 数量恢复、阈值变化或记录退出活跃跟踪时设置。 |
+| `resolutionReason` | `stock_recovered \| threshold_changed \| threshold_removed \| archived \| trashed`? | 解决时必填，解释为何结束本周期。 |
 | 公共元数据 | `EntityMeta` | 历史周期不可合并。 |
 
 #### DOM-053：低库存判定
@@ -633,4 +635,5 @@ P1 增加而不回填改变领域身份的基础实体：
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.1 | 2026-07-26 | 增加清单用途与低库存周期解决原因，以支持采购清单选择和归档/删除状态。 |
 | v1.0 | 2026-07-26 | 建立身份、空间、记录根、五种记录聚合、提醒、附件、库存、设置和同步扩展的统一逻辑模型与不变量。 |
