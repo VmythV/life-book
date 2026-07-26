@@ -1,6 +1,6 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.5 · 更新日期：2026-07-26 · 状态：领域基线
+> 项目代号：`life-book` · 版本：v1.6 · 更新日期：2026-07-26 · 状态：领域基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
@@ -467,6 +467,7 @@ active ⇄ archived
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
 | `planId` | `EntityId` | 所属提醒计划。 |
+| `subscriptionId` | `EntityId?` | P0 为空；账号空间中指向一个收件人订阅，使不同账号能独立知道了/稍后。 |
 | `sourceOccurrenceKey` | 文本? | 与周期或日期发生项绑定。 |
 | `deduplicationKey` | 文本 | 同一逻辑提醒稳定唯一。 |
 | `scheduledFor` | `Instant` | 解析时区和偏移后的目标绝对时刻。 |
@@ -478,7 +479,7 @@ active ⇄ archived
 
 ### 14.3 `NotificationDelivery`
 
-表示一次把提醒实例提交到系统通知服务的尝试，包含平台标识、调度标识、提交时间、结果、取消时间和非敏感错误码。它不声称通知已经被用户看到。
+表示一次把提醒实例提交到系统通知服务的尝试，包含本地 Installation/账号 Device、平台标识、调度标识、提交时间、结果、取消时间和非敏感错误码。一个账号订阅可在多个 Device 各有投递；它不声称通知已经被用户看到。
 
 #### DOM-070：提醒与记录独立
 
@@ -708,7 +709,7 @@ ReminderPlan 属于家庭业务记录；`ReminderSubscription` 决定哪个 Acco
 | `status` | `active \| cancelled` | 成员离开、计划失效或空间删除时取消。 |
 | 公共元数据 | `EntityMeta` | 修改只影响该收件人，不改业务时间。 |
 
-不同成员的订阅不复制 ReminderPlan 或 ReminderInstance。一个成员处理共享业务状态后，各订阅设备通过同步取消适用未来投递。
+不同成员的订阅不复制 ReminderPlan；每个 active subscription 按相同来源发生项展开收件人范围内的 ReminderInstance，同一账号的多个 Device 共享该逻辑实例并各有 NotificationDelivery。一个成员处理共享业务状态后，各订阅实例通过同步取消适用未来投递；仅知道了/稍后等个人提醒动作只改变该 subscription 的实例。
 
 ### 16.12 `SpaceTransferOperation`
 
@@ -836,6 +837,7 @@ ReminderSubscription 只控制某成员设备是否投递，不改变 ReminderPl
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.6 | 2026-07-26 | 将账号/家庭收件人订阅映射到提醒实例，并明确同账号多设备共享逻辑实例、各自投递。 |
 | v1.5 | 2026-07-26 | 将未接受状态完全归属 Invitation，SpaceMembership 从接受邀请的原子事务起进入 active。 |
 | v1.4 | 2026-07-26 | 明确家庭空间所有者来源与删除计划，并增加所有权转移、成员提醒订阅、跨空间移动和服务端可信审计实体。 |
 | v1.3 | 2026-07-26 | 完整定义账号、认证身份、设备会话、数据集绑定、成员关系、同步元数据、冲突、墓碑、附件传输和云备份逻辑实体。 |
