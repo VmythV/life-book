@@ -1,6 +1,6 @@
 # 生活有谱账号与同步规范
 
-> 项目代号：`life-book` · 版本：v1.0 · 更新日期：2026-07-26 · 状态：P1 实施基线
+> 项目代号：`life-book` · 版本：v1.1 · 更新日期：2026-07-26 · 状态：P1 实施基线
 >
 > 权威范围：可选账号、本地数据认领、设备会话、个人空间增量同步、冲突、附件传输、云备份协作、退出和账号删除
 >
@@ -22,7 +22,7 @@
 ### SYNC-002：设备上的 SQLite 仍是可写副本
 
 - 登录后本地数据库仍是 UI 与离线命令的事实源，不降级为必须联网的缓存。
-- 领域写入和 SyncMutation 必须在同一本地事务提交；网络只异步传输已提交事实。
+- 领域写入和 SyncMutation 必须在同一本地事务提交；网络只异步传输已提交领域事实或持久命令意图，不把待处理意图描述成已过账事实。
 - 服务端是跨设备版本、账号、membership 和授权的权威，不直接成为本机提醒调度或搜索索引的事实源。
 - 派生缓存、系统通知队列和传输临时文件不参与冲突胜负。
 
@@ -39,7 +39,8 @@
 
 ### SYNC-004：空间和身份保持稳定
 
-- 认领成功后个人空间、记录、子实体和附件 ID 保持不变。
+- 只有“云端个人空间为空”的直接认领才承诺个人空间、记录、子实体和附件 ID 原样保持；服务端以同一顺序确认既有本地库存流水。
+- 双方都有数据的合并不是直接认领，必须遵循 DATA-071：仅同一来源账号、同一目标空间且无 ID 冲突的对象可以保留 ID；其余对象分配新 ID 并原子重写全部内部引用。
 - LocalActor 保留并通过 claimedByAccountId 映射到 Account，历史作者不批量改写。
 - 一份当前本地数据集仍恰好只有一个默认个人空间。
 - 选择仅本机时，不同时挂载账号的云端个人空间制造两个“默认个人空间”。
@@ -47,7 +48,7 @@
 
 ### SYNC-005：服务端逐操作授权
 
-每个 push、pull、附件和云备份操作都重新验证 AccountSession、Device、SpaceMembership、spaceId 和目标。客户端隐藏页面、缓存角色或持有旧对象都不是授权；DOM-089 始终优先。
+每个 push、pull、附件和云备份操作都重新验证 AccountSession、Device、SpaceMembership、spaceId 和目标。家庭 mutation 还必须携带提交时的 authorizationMembershipId，并与当前 active membership 同一 tenure；同一账号离开后重新加入不能使旧 mutation 恢复合法。字段级高风险能力（例如放宽 sensitivity 或 aiAccess）也在服务端校验。客户端隐藏页面、缓存角色或持有旧对象都不是授权；DOM-089 始终优先。
 
 ## 2. 账号与认证
 
@@ -116,7 +117,7 @@ signed_in_* → reauthentication_required → signed_in_* / signed_out
 | 本地 | 云端 | 默认路径 |
 | --- | --- | --- |
 | 空 | 空 | 用现有本地空间 ID 创建账号个人空间并绑定。 |
-| 有数据 | 空 | 预览后认领现有空间，保留所有 ID 并上传。 |
+| 有数据 | 空 | 预览后直接认领现有空间，保留所有 ID 和既有库存账本顺序并上传。 |
 | 空 | 有数据 | 在暂存数据库下载完整快照、验证后原子装载并绑定。 |
 | 有数据 | 有数据 | 必须 choice_required；不得自动合并或覆盖。 |
 
@@ -126,7 +127,7 @@ signed_in_* → reauthentication_required → signed_in_* / signed_out
 
 用户可以：
 
-1. **预览并合并到云端个人空间**：复用通用导入的映射/去重界面，把本地对象作为带原 ID 的候选导入；同 ID 根据来源绑定判断，同名不自动合并。
+1. **预览并合并到云端个人空间**：复用通用导入的映射/去重界面，把本地对象作为候选导入；按 DATA-071 判断保留或重映射 ID，预览必须列出映射与关联结果，同名不自动合并。
 2. **备份本机后改用云端**：先提供本地加密备份，再在暂存区下载并原子替换；没有成功备份也可继续，但需加强确认。
 3. **保持本机且暂不开启同步**：AccountSession 保留，DatasetBinding 为 unbound；云端个人空间不显示在普通生活簿中。
 4. **取消**：保持登录或退出，均不改变本地数据。
@@ -193,20 +194,26 @@ disabled
 
 撤销如果已经成为独立业务事实，就创建反向领域命令和新 mutation，不删除已经发送的 outbox 项。
 
+绑定空间的库存变化是本规则的领域特例：本地事务只创建不可变 pending StockChangeIntent、对应 SyncMutation 和 `projectedQuantityCache`，不得创建 StockTransaction、修改 `currentQuantityCache`、创建/解决 LowStockEpisode 或发送低库存通知。只有 SYNC-032 的服务端接受结果被应用后，这些确认事实才进入本地副本。
+
+库存响应或 pull 变化也必须原子应用：accepted 同时写意图终态、唯一流水、确认缓存、预估重算、低库存周期与副作用任务；rejected 同时写意图终态、受控冲突与预估重算且不改账本。不得出现 intent=accepted 但流水缺失，或流水已存在但意图仍 pending。
+
 ### SYNC-032：push 协议语义
 
-客户端按空间和本地提交顺序发送，每批最多 100 个 mutation 或 1 MiB 非附件负载，以先达到者为准。每项携带领域模型 §16.6 定义的身份、操作、baseServerVersion 和 payloadVersion。
+客户端按空间和本地提交顺序发送，每批最多 100 个 mutation 或 1 MiB 非附件负载，以先达到者为准。每项携带领域模型 §16.6 定义的身份、操作、baseServerVersion、snapshotGeneration 和 payloadVersion。
 
 服务端逐项：
 
-1. 验证会话、设备、active membership、空间和能力版本；
+1. 验证会话、设备、active membership（家庭写入还校验 authorizationMembershipId）、空间、字段级能力和协议版本；
 2. 按 clientMutationId 查找既有结果并幂等返回；
-3. 验证 baseServerVersion、墓碑和领域不变量；
+3. 对尚无幂等收据的新 mutation 验证 snapshotGeneration 等于当前可写 generation，再验证 baseServerVersion、墓碑和领域不变量；
 4. 在一个服务端事务应用领域改变、分配 entity serverVersion 和 space ServerSequence；
 5. 生成必要审计、变更记录和附件任务；
 6. 返回 acknowledged、conflict 或受控拒绝。
 
 批次传输失败不表示项失败；客户端使用相同 mutation ID 重试。服务端不得部分应用一个领域 mutation。
+
+库存 mutation 以 StockChangeIntent.clientMutationId 幂等，并按 `(spaceId, recordId)` 加锁或等价串行：delta 类基于最新确认余额重新校验非负，adjust 要求 baseLedgerSequence 与最新值精确相等；接受时一次性分配 next ledgerSequence、计算 before/delta/after/postedAt、创建唯一 StockTransaction、更新确认数量与低库存周期并把意图置为 accepted。余额不足、adjust 基线变化或目标失效时把意图置为 rejected，外层 SyncMutation 进入 conflict，返回 `inventory_insufficient`、`inventory_base_changed` 或 `inventory_target_deleted`，不创建或重写流水。
 
 ### SYNC-033：mutation 状态
 
@@ -215,19 +222,22 @@ pending → sending → acknowledged
                    ├→ conflict
                    ├→ retry_wait → sending
                    ├→ rejected_forbidden
+                   ├→ rejected_moved
                    └→ rejected_version
 ```
 
 - sending 在进程终止后恢复为 pending；
 - retry_wait 使用带随机抖动的有限指数退避，恢复联网或用户主动重试可提前唤醒；
 - rejected_forbidden 不自动复制到个人空间，也不反复发送；
+- rejected_moved 表示记录已由服务端移出 mutation 声明的源空间；旧操作不自动改投目标空间，用户仍有目标权限时只能基于目标当前版本重新确认并创建新 mutation；
 - rejected_version 使目标只读并要求升级/迁移；
 - acknowledged 收据至少保留 400 天，以覆盖支持的离线窗口和高风险命令幂等。
+- 库存 rejected 使用 conflict 路径而不是 acknowledged；相同 clientMutationId 的任何重试返回同一 rejected 结果，用户修复只能创建新意图和新 mutation。
 
 ### SYNC-034：pull 与游标
 
 - 服务端按单一空间 ServerSequence 严格递增返回变化页；默认每页最多 500 项或 2 MiB；
-- 每项包含实体最新服务器版本、变化类型和适用墓碑，不依赖 updatedAt 排序；
+- 每项包含实体最新服务器版本、变化类型和适用墓碑，不依赖 updatedAt 排序；跨空间移动使用共享 transferId 的 `record_departed` / `record_arrived`，不得编码成 delete/create；
 - 客户端在本地事务中验证并应用完整页面，之后才推进 SyncCursor；
 - 页面重试必须返回兼容结果；重复变化按 serverVersion 忽略；
 - 应用远端变化后，重放/重新校验尚未发送的本地 mutation；
@@ -243,11 +253,24 @@ pending → sending → acknowledged
 - 未知变更被新客户端支持后恢复；
 - 云备份恢复或服务端修复创建新世代。
 
-客户端先冻结该空间网络写入、保存未确认本地 mutation 和设备加密检查点，在暂存数据库下载、校验快照与附件清单，再重放仍合法的本地 mutation。全部成功后原子切换；失败继续使用原副本并显示 integrity_blocked，不用空库覆盖。
+客户端先冻结该空间网络写入、保存未确认本地 mutation 和设备加密检查点，在暂存数据库下载、校验快照与附件清单，再重放仍合法的本地 mutation。快照只含当前属于该空间的实体；历史 departure 收据不得含正文，基于旧空间或旧 membership 的 mutation 必须失效。全部成功后原子切换；失败继续使用原副本并显示 integrity_blocked，不用空库覆盖。
 
 ### SYNC-036：运行触发与节流
 
 同步在用户主动刷新、App 启动/前台、领域写入后网络可用、系统后台机会和远程静默信号时尝试。后台机会不保证执行；批量变更、低电量和计费网络遵循平台/用户设置。用户主动创建的小型变更优先，附件可延后。
+
+### SYNC-037：跨空间 transfer envelope
+
+跨空间移动只能在线由 SpaceTransferOperation 执行，保持 recordId 与聚合子对象 ID，不走普通单空间 mutation：
+
+1. 服务端在一个事务锁定记录、源空间、目标空间与双方 membership，校验 baseRecordVersion、baseSpaceVersions、映射和附件准备；
+2. 原子修改聚合归属并提升记录版本，向源流写 `record_departed(transferId)`、向目标流写 `record_arrived(transferId, aggregateSnapshot)`，同时分配两侧 ServerSequence；
+3. 两个事件是同一提交的投影，不是 Tombstone；服务端对 transferId 幂等，不能只提交一侧；
+4. 同时有两空间权限的客户端无论先收到哪一事件，都将同一记录 ID 原子切换到目标；departed 先到时临时 `transfer_pending` 只读，arrived 先到时直接切换，后到事件只完成收据；
+5. 只有源权限的客户端收到 departed 后清除可见内容，只留不含内容的迁移收据；只有目标权限的客户端从 arrived 建立副本；
+6. 移动前基于源空间产生的 mutation 返回 rejected_moved，不形成可选“保留旧版本”的普通冲突，也不能自动改投目标。
+
+每空间 cursor 仍独立；paired event 解决乱序和幂等，不要求客户端同时订阅两个空间。提交前失败回滚并保持源记录可写，committed 后不提供协议级回滚。
 
 ## 5. 冲突判定与解决
 
@@ -264,11 +287,12 @@ pending → sending → acknowledged
 ### SYNC-041：通用优先级
 
 1. 服务端权限撤销与永久删除墓碑不可被用户冲突选择覆盖；
-2. sensitivity 和 aiAccess 并发时采用更严格结果；
-3. 关系实体的并发增删默认删除优先；
-4. 归档可与内容编辑合并；
-5. 删除到回收站优先隐藏，但保留冲突内容，恢复时让用户选择；
-6. 任何自动结果必须仍通过当前领域规则；否则转为冲突。
+2. 记录已跨空间移动时，旧源 mutation 失效；用户不能用旧源版本覆盖目标版本；
+3. sensitivity 和 aiAccess 并发时采用更严格结果；
+4. 关系实体的并发增删默认删除优先；
+5. 归档可与内容编辑合并；
+6. 删除到回收站优先隐藏，但保留冲突内容，恢复时让用户选择；
+7. 任何自动结果必须仍通过当前领域规则；否则转为冲突。
 
 ### SYNC-042：按对象的默认规则
 
@@ -280,6 +304,7 @@ pending → sending → acknowledged
 | 归档与普通内容编辑 | 合并内容并保留归档；解除归档后可见。 |
 | 回收站删除与内容编辑 | 回收站优先；恢复时解决编辑版本。 |
 | 永久删除与任何旧修改 | 墓碑优先，旧 mutation 拒绝。 |
+| 记录跨空间移动与旧源修改 | 返回 rejected_moved；不自动重定向，也不让旧源版本参与目标字段冲突。 |
 | 分类删除与记录设置该分类 | 分类删除优先，记录 categoryId 置空并提示。 |
 | 标签/关联不同关系 | 关系实体分别合并；同一关系增删时删除优先。 |
 | 不同清单项目 | 自动合并。 |
@@ -290,9 +315,10 @@ pending → sending → acknowledged
 | 同一周期实例动作重试 | clientMutationId 幂等返回原结果。 |
 | 同一周期实例完成与跳过 | 语义冲突，不自动选；用户基于最新状态处理。 |
 | 重复规则并发编辑 | 整个 RecurrenceSegment 冲突，不拼接规则。 |
-| 不同库存买入/使用流水 | 不可变流水全部保留，由服务端 ledgerSequence 排序重算。 |
-| 合并库存后将为负 | 导致负数的后接受 mutation 拒绝为冲突，不改写数量。 |
-| adjust 与其 base 后的新流水 | base 已变即冲突，不把旧目标数量静默重解释。 |
+| 不同库存 purchase/consume/discard/lost 意图 | 服务端按实际串行接受顺序逐个过账；每个接受的意图创建一条新且不可变的流水，不重排或重算既有流水。 |
+| 下一库存意图会使确认余额为负 | 该意图 rejected 并形成冲突；既有确认数量和流水不变。 |
+| adjust 意图与其 baseLedgerSequence 后的新流水 | 拒绝旧意图并展示最新确认数量；用户重新确认后创建新意图，不把旧目标数量静默重解释。 |
+| 相同库存 clientMutationId 重试 | 返回原 accepted/rejected 结果；不得生成第二条流水。 |
 | 不同附件新增 | 合并。 |
 | 附件移除与重传/修改元数据 | 移除优先。 |
 | 提醒计划时间双方修改 | 冲突；不得静默改变明确提醒。 |
@@ -312,7 +338,7 @@ pending → sending → acknowledged
 
 ### SYNC-050：回收站是普通同步状态
 
-trashedAt、purgeAfter、trashedFrom 和恢复作为领域变化同步。任一设备恢复后产生新 serverVersion；其他设备取消原删除后的本地清理任务并按业务规则重建未来提醒。30 天以服务端确认的删除时刻作为跨设备安全基准，设备离线显示可以使用本地估算但不能提前永久删除云端。
+trashedAt、purgeAfter、serverTrashedAt、serverPurgeAfter、trashedFrom 和恢复作为领域变化同步。设备离线删除时立即写本地 trashedAt 与估算 purgeAfter，但不得据此永久清理绑定内容；服务端接受后以其时钟写 `serverTrashedAt` 和 `serverPurgeAfter = serverTrashedAt + 30 × 24 小时`，客户端收到确认后把有效 purgeAfter 对齐到该值。任一设备恢复后产生新 serverVersion；其他设备清空四个删除字段、取消原清理任务并只重建未来提醒。迟到删除确认因 baseServerVersion 失效不得覆盖恢复。
 
 ### SYNC-051：永久删除
 
@@ -322,9 +348,13 @@ trashedAt、purgeAfter、trashedFrom 和恢复作为领域变化同步。任一�
 - 删除失败保留回收站对象，不显示已永久删除；
 - 级联子 ID 不可作为新对象重新上传。
 
+Tombstone 不是可恢复记录：只允许保留 spaceId、entityType、entityId、serverVersion、serverSequence、purgedAt、retainUntil 和 reason；不得保留标题、正文、详情、标签、附件、AI 输入或冲突快照。永久清理成功即表示这些业务内容不可恢复，即使最小墓碑仍为同步安全存在。
+
+SpaceTransferOperation 的 record_departed/record_arrived 不是永久删除，不创建 Tombstone、不触发 DOM-090，也不擦除仍由目标记录引用的附件；其无内容 departure 收据只用于 transferId 幂等与解释旧源 mutation。
+
 ### SYNC-052：保留窗口
 
-P1 默认最小墓碑和 mutation 收据保留 400 天。超过窗口未同步的 Device 在下次访问时必须完整快照重建；服务端不得接受其基于过期 generation 的旧写入。账号/家庭删除后的法律和安全最小记录由合规规范控制，但不能用于恢复生活正文。
+P1 默认最小墓碑和不含内容的 mutation 幂等收据保留 400 天。裁剪到期墓碑前，服务端必须先生成更高 snapshot generation、把旧 generation 整体设为不可写，并要求仍使用旧 generation 的 Device 快照重建；服务端不得接受、重放或“当作新建”处理其旧写入，即使 baseServerVersion=0。账号/家庭删除后的法律和安全最小记录由合规规范控制，但不能用于恢复生活正文。
 
 ## 7. 附件同步
 
@@ -356,6 +386,7 @@ P1 默认最小墓碑和 mutation 收据保留 400 天。超过窗口未同步�
 ### SYNC-070：同步业务计划，不同步平台队列
 
 - ReminderPlan、ReminderInstance 的业务状态和适用去重键同步；
+- ReminderSubscription 的 mode、active/paused/cancelled 和 membership tenure 同步；paused 或 mode=off 不产生新投递；
 - NotificationDelivery 的平台调度 ID、权限和本机尝试不跨设备同步；
 - pull 应用时间、完成、归档、删除或敏感变化后写入本机对账任务；
 - 每台 Device 按 REM-121 的订阅设置产生独立投递；
@@ -363,7 +394,7 @@ P1 默认最小墓碑和 mutation 收据保留 400 天。超过窗口未同步�
 
 ### SYNC-071：通知动作
 
-通知动作先执行本地幂等领域命令和 outbox。服务器若发现另一设备已处理同一逻辑实例，返回既有结果或语义冲突；客户端更新本地状态并清理过时通知，不追加第二条完成/库存流水。
+通知动作先执行本地幂等领域命令和 outbox。服务器若发现同一收件人另一设备已处理同一逻辑实例，返回既有结果或语义冲突；客户端更新本地状态并清理过时通知，不追加第二条完成/库存流水。低库存“知道了”只同步当前 membership 的 ReminderInstance；加入共享采购清单、库存恢复等共享领域动作才触发所有适用订阅对账。
 
 ## 9. 云备份
 
@@ -392,7 +423,7 @@ P1 云备份通过传输加密和服务端存储加密保护，并受账号授�
 7. 所有设备进入 snapshot_required，未上传操作单独列出供重放或导出；
 8. 失败则恢复原 generation 并解除暂停。
 
-同步引擎不得把恢复后的旧值逐条当成“较新编辑”覆盖当前数据。
+同步引擎不得把恢复后的旧值逐条当成“较新编辑”覆盖当前数据。若备份中的 ID 在其基线之后已产生永久删除墓碑，恢复不得删除墓碑或复活同 ID；用户确需取回内容时，必须按 DATA-071 作为新 ID 聚合导入，并在恢复报告列出。
 
 ### SYNC-083：本地备份进入已绑定数据集
 
@@ -456,8 +487,9 @@ P1 云备份通过传输加密和服务端存储加密保护，并受账号授�
 | offline_queued | 当前离线 · 会在联网后同步 |
 | auth_required | 需要重新登录 · 本机数据仍在 |
 | conflict | 有一处需要你选择 |
+| rejected_moved | 这条记录已移到其他空间；不自动重试旧操作 |
 | upgrade_required | 需要更新 App 才能继续同步；保持只读保护 |
-| integrity_blocked | 同步已暂停，数据仍保存在本机；提供诊断/导出 |
+| integrity_blocked | 同步已暂停，数据仍保存在本机；提供诊断，并仅在安全只读检查通过时提供导出 |
 
 不得把“请求已发送”显示为“所有设备已经同步”。
 
@@ -471,7 +503,7 @@ P1 云备份通过传输加密和服务端存储加密保护，并受账号授�
 - 认证过期：暂停空间，重新登录后从原 cursor 继续；
 - 权限拒绝：停止目标 mutation 并解释，不自动换空间；
 - 配额/存储不足：优先同步小型元数据，附件暂停并提供管理入口；
-- Schema 未知：保护性只读，允许导出，不尝试删字段；
+- Schema 未知：保护性只读；仅在存在兼容只读读取器且完整性检查通过时允许导出，不尝试删字段；
 - 本地完整性失败：停止相关写入，创建诊断副本并走 DATA-121；
 - 服务端错误不得清空本地数据或自动退出账号。
 
@@ -510,15 +542,15 @@ P1 云备份通过传输加密和服务端存储加密保护，并受账号授�
 
 ### SYNC-121：传输和顺序
 
-至少用两台 iOS、两台 Android 和跨平台组合覆盖：离线编辑、乱序、重复 push、响应丢失、分页 pull、进程终止、退避、cursor 损坏、快照重建、服务升级与旧客户端。每个 clientMutationId 在任意重试序列下最多产生一次业务结果。
+至少用两台 iOS、两台 Android 和跨平台组合覆盖：离线编辑、乱序、重复 push、响应丢失、分页 pull、进程终止、退避、cursor 损坏、快照重建、服务升级与旧客户端。每个 clientMutationId 在任意重试序列下最多产生一次业务结果。跨空间移动另覆盖 arrived/departed 两种乱序、只有源权限、只有目标权限、双空间权限、重复事件与移动后旧 mutation；generation 裁剪后以旧 ID、baseServerVersion=0 新建也必须得到 snapshot_required。
 
 ### SYNC-122：领域冲突
 
-对 SYNC-042 每一行提供自动化三方 fixture，验证最终领域不变量、冲突 UI 输入和新 serverVersion。库存并发至少覆盖余额恰为 0、会为负、adjust 基准变化；重复规则覆盖 DST 与系列切分；清单覆盖项目状态与排序。
+对 SYNC-042 每一行提供自动化三方 fixture，验证最终领域不变量、冲突 UI 输入和新 serverVersion。库存并发至少覆盖两设备离线连续操作、跨设备先到顺序、余额恰为 0、会为负、adjust 基准变化、accepted/rejected 回包重复和拒绝后重新提交，并断言已过账流水字段从不被重排或重算；重复规则覆盖 DST 与系列切分；清单覆盖项目状态与排序。
 
 ### SYNC-123：删除和长期离线
 
-覆盖 trashed/restore/purge 在不同设备交错、墓碑重复、附件擦除、离线 399 天和 401 天设备、过期 generation 写入、账号删除和家庭成员失权。任何旧副本不得复活永久删除 ID。
+覆盖 trashed/restore/purge 在不同设备交错、本地时间提前 30 天仍不得在服务确认前 purge、服务端删除时钟确认、墓碑重复、附件擦除、离线 399 天和 401 天设备、过期 generation 写入、账号删除、家庭成员失权与重新加入。旧 membership 写入不得因同账号重加恢复合法；任何旧副本不得复活永久删除 ID。
 
 ### SYNC-124：附件与空间故障
 
@@ -532,4 +564,5 @@ P1 云备份通过传输加密和服务端存储加密保护，并受账号授�
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.1 | 2026-07-26 | 限定 ID 保留范围，分离待同步库存意图与服务端过账，统一回收站/墓碑语义，并定义保持 ID 的跨空间 transfer envelope。 |
 | v1.0 | 2026-07-26 | 定义可选账号、邮箱验证码认证、本地数据认领、增量同步、领域冲突、墓碑、附件、云备份、设备与账号生命周期。 |
