@@ -502,7 +502,8 @@ active ⇄ archived
 | `sourceOccurrenceKey` | 文本? | 与周期或日期发生项绑定。 |
 | `deduplicationKey` | 文本 | 同一逻辑提醒稳定唯一。 |
 | `scheduledFor` | `Instant` | 解析时区和偏移后的目标绝对时刻。 |
-| `state` | `planned \| scheduled \| acknowledged \| snoozed \| cancelled \| expired \| failed` | `delivered` 不作为可可靠确认的业务状态。 |
+| `state` | `planned \| scheduled \| paused \| acknowledged \| snoozed \| cancelled \| expired \| failed` | `delivered` 不作为可可靠确认的业务状态；paused 是可恢复的临时抑制。 |
+| `pauseReason` | `space_deletion_scheduled \| subscription_paused`? | paused 时必填；恢复 future 实例时清空，已到期实例改为 expired。 |
 | `acknowledgementKind` | `opened \| done \| skipped \| noted \| shopping_added`? | 必须适合来源。 |
 | `snoozedFromId` | `EntityId?` | 稍后提醒链的上一实例。 |
 | `failureCode` | 受控错误? | 不含用户内容。 |
@@ -668,10 +669,11 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 | --- | --- | --- |
 | `clientMutationId` | `EntityId` | 设备生成的服务端幂等键，永不复用。 |
 | `spaceId`、`entityType`、`entityId` | 标识 | 明确鉴权和目标。 |
+| `authorizationMembershipId` | `EntityId?` | 家庭空间写入时必填并绑定提交时的 membership tenure；重新加入不能复用旧授权。 |
 | `operation` | 受控命令 | 使用领域命令语义，不传任意 SQL/表 patch。 |
 | `baseServerVersion` | `ServerVersion` | 0 表示客户端认为实体尚不存在。 |
 | `payloadVersion` | 正整数 | 机器格式兼容版本。 |
-| `state` | `pending \| sending \| retry_wait \| acknowledged \| conflict \| rejected_forbidden \| rejected_version` | sending 崩溃后可安全回到 pending。 |
+| `state` | `pending \| sending \| retry_wait \| acknowledged \| conflict \| rejected_forbidden \| rejected_moved \| rejected_version` | sending 崩溃后可安全回到 pending；rejected_moved 表示目标已离开原空间。 |
 | `attemptCount`、`nextAttemptAt` | 非负整数、`Instant?` | 受限指数退避。 |
 | `resultServerVersion`、`resultServerSequence` | 版本? | acknowledged 时必填。 |
 | `errorCode` | 受控码? | 不含用户内容。 |
@@ -702,7 +704,7 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 | `serverVersion`、`serverSequence` | 版本 | 使所有设备观察删除。 |
 | `purgedAt` | `Instant` | 服务端接受永久删除时间。 |
 | `retainUntil` | `Instant` | 同步安全期限；与 30 天业务回收站不同。 |
-| `reason` | `user_purge \| cascade \| space_move \| account_deleted \| family_deleted` | 不含内容。 |
+| `reason` | `user_purge \| cascade \| account_deleted \| family_deleted` | 不含内容；跨空间移动不产生 Tombstone。 |
 
 墓碑只含上述删除控制字段，不保留标题、正文、详情、标签、附件、冲突快照或其他可恢复业务内容；因此业务内容清理完成与墓碑保留不矛盾。墓碑到期后仍离线的设备必须通过新快照 generation 重建，不能把旧实体当新增上传或基于旧 generation 写入。
 
@@ -734,7 +736,7 @@ ReminderPlan 属于家庭业务记录；`ReminderSubscription` 决定哪个 Acco
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
-| `spaceId`、`reminderPlanId`、`recipientAccountId` | `EntityId` | 组合唯一，recipient 必须是 active member。 |
+| `spaceId`、`reminderPlanId`、`membershipId`、`recipientAccountId` | `EntityId` | `(reminderPlanId, membershipId)` 唯一；membership 必须 active 且属于 recipient。 |
 | `mode` | `all_active_devices \| selected_devices \| off` | 默认由家庭规范决定。 |
 | `selectedDeviceIds` | ID 集合 | selected_devices 时至少一个，且都属于 recipient。 |
 | `origin` | `creator_default \| user_opt_in \| assignment` | 解释订阅来源，不作为权限。 |
@@ -750,15 +752,16 @@ ReminderPlan 属于家庭业务记录；`ReminderSubscription` 决定哪个 Acco
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
-| `sourceRecordId`、`sourceSpaceId`、`targetSpaceId` | `EntityId` | 两空间不同；发起时源记录属于 source。 |
-| `targetRecordId` | `EntityId?` | 预检后分配的新 ID，永不等于 sourceRecordId；提交后成为目标空间稳定 ID。 |
+| `recordId`、`sourceSpaceId`、`targetSpaceId` | `EntityId` | 两空间不同；发起时记录属于 source，提交后同一 ID 属于 target。 |
 | `initiatedByAccountId` | `EntityId` | 必须同时有来源操作权和目标创建权。 |
-| `state` | `preflight \| awaiting_confirmation \| transferring \| committed \| failed_retryable \| rolled_back` | transferring 起源记录被写锁定；任何观察点最多只有一个可写副本。 |
+| `state` | `preflight \| awaiting_confirmation \| transferring \| committed \| failed_retryable \| rolled_back` | transferring 起记录被服务端写锁定；committed/rolled_back 为终态。 |
 | `baseRecordVersion`、`baseSpaceVersions` | 版本 | 防止预览后对象或成员资格改变。 |
 | `mappingPlan` | 结构化选择 | 分类、标签、关联、提醒和审计处理选择；不复制正文。 |
+| `sourceServerSequence`、`targetServerSequence` | `ServerSequence?` | committed 时同时填充，分别定位成对的 departed/arrived 事件。 |
+| `committedRecordVersion` | `ServerVersion?` | committed 时同记录的新权威版本。 |
 | `startedAt`、`completedAt` | `Instant`、`Instant?` | 服务端时间。 |
 
-“移动”在同步层实现为“目标空间创建新 ID 的完整副本 + 源 ID 永久删除”，不直接改 `spaceId`，也不复用源 ID。服务端协调器先构建不可见目标暂存副本并验证附件，再使目标可见、为源写入 `reason=space_move` 的永久删除墓碑及两空间各自序列；迟到客户端可能短暂只看到一侧，但不能写入源旧版本，也不会因同一 ID 产生复活或跨空间冲突。提交前失败删除暂存目标并解锁源；提交后不提供自动回滚，用户可另行复制为新记录。
+服务端在一个事务中锁定记录和两空间，验证映射/附件后修改记录及聚合子对象的 `spaceId`、提升同一 recordId 的版本，并向源/目标变化流写入共享 transferId 的 `record_departed` / `record_arrived` 事件。它们不是 Tombstone：departed 不表示永久删除，arrived 携带目标权限内可见的完整聚合快照。客户端按 transferId 幂等应用；先收到 departed 时把本地对象置为 `transfer_pending` 只读，先收到 arrived 时原子切换归属，第二个事件只完成收据。只有源权限的客户端在 departed 后清除内容并保留无内容收据，只有目标权限的客户端从 arrived 建立副本。旧源 mutation 返回 rejected_moved，不能自动改投目标空间。
 
 ## 17. 聚合事务边界
 
@@ -838,9 +841,9 @@ ReminderSubscription 只控制某成员设备是否投递，不改变 ReminderPl
 
 StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接受的事实。绑定空间只有服务端可以确定 ledgerSequence、quantityBefore、delta 和 quantityAfter；客户端不得先创建一条流水再由服务端重排或重算其不可变字段。adjust 的 baseLedgerSequence 已变化时必须拒绝并让用户基于最新确认数量重新提交，不能把旧“调整为”静默应用到新账本。
 
-### DOM-094：跨空间移动不保留记录 ID
+### DOM-094：跨空间移动保留记录 ID
 
-跨空间移动的目标记录、子对象和附件映射使用新 ID，源 ID 以永久删除墓碑终结。来源关系只写入受权限保护的迁移审计，不成为普通跨空间 RecordLink；任何客户端都不得把源实体改 spaceId 后上传。
+跨空间移动保留记录及聚合子对象的稳定 ID，由服务端 SpaceTransferOperation 原子改变归属并产生 paired transfer events；客户端不得直接把实体改 spaceId 后上传。移动不是复制、回收站或永久删除，不触发 DOM-090，也不允许旧源版本覆盖目标版本。
 
 ## 19. 领域命令和结果
 
@@ -882,8 +885,9 @@ StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.9 | 2026-07-26 | 以成对 transfer event 保持跨空间记录 ID，并补充 membership 授权代次与提醒实例暂停状态。 |
 | v1.8 | 2026-07-26 | 为库存变化意图增加账本基线，确保并发 adjust 不会静默重解释。 |
-| v1.7 | 2026-07-26 | 分离库存变化意图与权威流水，定义服务端回收站时钟、成员重新加入 epoch、可恢复提醒暂停、个人低库存确认及新 ID 跨空间移动。 |
+| v1.7 | 2026-07-26 | 分离库存变化意图与权威流水，定义服务端回收站时钟、成员重新加入 epoch、可恢复提醒暂停和个人低库存确认；当时的跨空间 ID 方案已由 v1.9 替代。 |
 | v1.6 | 2026-07-26 | 将账号/家庭收件人订阅映射到提醒实例，并明确同账号多设备共享逻辑实例、各自投递。 |
 | v1.5 | 2026-07-26 | 将未接受状态完全归属 Invitation，SpaceMembership 从接受邀请的原子事务起进入 active。 |
 | v1.4 | 2026-07-26 | 明确家庭空间所有者来源与删除计划，并增加所有权转移、成员提醒订阅、跨空间移动和服务端可信审计实体。 |
