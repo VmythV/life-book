@@ -1,6 +1,6 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.15 · 更新日期：2026-07-26 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.16 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
@@ -37,7 +37,7 @@
 | `ServerSequence` | 服务端在一个空间内分配的变更顺序。 | 单调递增且不依赖设备时钟；只比较同一空间。 |
 | `LongCounter` | 跨 SQLite/native/JS/接口边界的非负单调计数器。 | `0...9223372036854775807`；递增使用 checked `+1`，不得回绕或用 JavaScript `number`；边界编码遵循 TD-006。 |
 | `NotificationDatasetEpoch` | 隔离不同 active dataset 通知副作用的 branded `LongCounter`。 | 权威值只来自当前 `phase=active` 的受认证 `DatasetControlRecord`；初始化为 `0`，仅提交成功的整体恢复/手动回滚递增。 |
-| `NotificationInputRevision` | current epoch 内使调度结果失效的 branded `LongCounter`。 | 每个 installation/epoch 初始化为 `0`；任何业务、设置、能力或合同输入变化时在入队事务 checked +1，并原子隐藏旧 published run。 |
+| `NotificationInputRevision` | current epoch 内使调度结果失效的 branded `LongCounter`。 | 每个 installation/epoch 初始化为 `0`；任何业务、设置、能力或合同输入变化时在入队事务 checked +1，并原子隐藏旧 published run。业务/设置写入遇到上限时拒绝整条命令；已经发生的外部能力变化遇到上限时必须先隐藏旧投影并进入受审维护状态，绝不回绕或沿用旧成功。 |
 | `ContentHash` | 内容完整性哈希。 | 用于附件、备份和同步校验，不作为加密。 |
 
 所有用户可见文本使用 Unicode。长度按 Unicode 码点校验；存储不得静默截断。
@@ -661,7 +661,7 @@ seal 短事务必须同时验证同 run 行数恰等于 `expectedDecisionCount`�
 | `tzdbVersion`、`recurrenceEngineVersion`、`adapterContractVersion` | 版本 | 任一不匹配使水位失效并触发重算。 |
 | `failureCode` | 受控无内容码? | degraded 时解释重试原因。 |
 
-任一调度输入改变时，拥有该输入的业务/设置事务必须原子 checked 增加 `notificationInputRevision`、把 state 置 pending、清 `publishedRunId/scheduledThrough/inputFingerprint/failureCode` 并耐久入队，因此旧 Decision 在 pending/running 期间不可见。原生 capability/environment 变化在被 App 接收的首个短事务执行同一失效；此前最新 Delivery 也因 environment/capability 不匹配不能声称当前。最终短事务先重读 input revision 与所有 guards，并验证 sealed run 的 expected count/hash：全匹配且完整成功时 CAS 为 succeeded；平台结果失败时可 CAS 为 degraded 并发布完整 Decision run，但不发布成功水位；guard 变化或崩溃不发布本轮 run。真实平台 receipt 可以保留为非当前技术事实。
+任一调度输入改变时，拥有该输入的业务/设置事务必须原子 checked 增加 `notificationInputRevision`、把 state 置 pending、清 `publishedRunId/scheduledThrough/inputFingerprint/failureCode` 并耐久入队，因此旧 Decision 在 pending/running 期间不可见。业务/设置命令在 revision 已达上限时整体失败且不改变输入；原生 capability/environment 是已经发生、不能拒绝的外部事实，若其失效事务发现上限，必须原子把 state 置 pending、清 pointer/水位/fingerprint/failureCode、保留最大 revision、写 `notification_revision_exhausted` 耐久维护任务并停止全部新 platform write/current publish，直到受审迁移或新 dataset epoch 重置，不得继续显示旧成功。原生变化在被 App 接收的首个短事务执行上述失效；此前最新 Delivery 也因 environment/capability 不匹配不能声称当前。最终短事务先重读 input revision 与所有 guards，并验证 sealed run 的 expected count/hash：全匹配且完整成功时 CAS 为 succeeded；平台结果失败时可 CAS 为 degraded 并发布完整 Decision run，但不发布成功水位；guard 变化或崩溃不发布本轮 run。真实平台 receipt 可以保留为非当前技术事实。
 
 ### 14.8 `ReminderDeliveryAggregate`（P1）
 
@@ -1090,6 +1090,7 @@ StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.16 | 2026-07-26 | 固定 NotificationInputRevision 上限时业务写与已发生外部能力变化的不同 fail-closed 处理。 |
 | v1.15 | 2026-07-26 | 增加 ActionInbox stale_noop 与可恢复 claim 状态机，耐久化明确的隐私放宽刷新意图，并区分文案收紧与动作撤权。 |
 | v1.14 | 2026-07-26 | 统一提醒对账的唯一输入修订护栏，并明确 sealed SchedulingRun 仅允许 phase 进入发布或丢弃终态。 |
 | v1.13 | 2026-07-26 | 增加 NotificationInputRevision、完整 sealed SchedulingRun/Decision 发布、fresh action lease、有效呈现合同、确定性恢复优先级和 P1 ReminderDeliveryAggregate，并校正 ExactDecimal 值域。 |
