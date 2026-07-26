@@ -1,12 +1,12 @@
 # 生活有谱数据生命周期规范
 
-> 项目代号：`life-book` · 版本：v1.1 · 更新日期：2026-07-26 · 状态：数据生命周期基线
+> 项目代号：`life-book` · 版本：v1.2 · 更新日期：2026-07-26 · 状态：数据生命周期基线
 >
-> 权威范围：本地数据、临时数据、附件、备份、恢复、导出、导入、删除、迁移和兼容语义
+> 权威范围：本地数据、临时数据、附件，以及备份/恢复/导出/导入/删除/迁移的产品范围、用户可见成功/取消、保留和兼容承诺
 >
-> 不负责：具体加密算法参数、物理数据库表、云同步冲突和法律保留期限
+> 不负责：具体加密算法与 byte framing、认证 manifest 字段、物理数据库表、云同步冲突和法律保留期限
 >
-> 依赖文档：[领域模型](domain-model.md)、[业务规则](business-rules.md)、[账号与同步](account-and-sync.md)、[产品需求基线](product-features.md)、[质量属性基线](quality-attributes.md)
+> 依赖文档：[领域模型](domain-model.md)、[业务规则](business-rules.md)、[账号与同步](account-and-sync.md)、[产品需求基线](product-features.md)、[质量属性基线](quality-attributes.md)、[TD-010 原子恢复](adr/0010-sqlite-snapshot-migration-and-atomic-restore.md)、[TD-011 备份密码学](adr/0011-backup-container-and-cryptography.md)
 
 ## 1. 数据状态总览
 
@@ -34,7 +34,7 @@
 | --- | --- | --- | --- |
 | 领域数据 | 记录、清单、周期实例、库存意图/流水、提醒计划 | P0 本地权威；绑定后本地是可同步副本，其中 StockChangeIntent 本地持久、StockTransaction 只由服务端权威过账后同步确认 | 加密数据库 |
 | 附件内容 | 图片、用户文件 | 权威内容 | App 私有加密文件区 |
-| 安全材料 | 数据主密钥、令牌、P1 自带 Key | 权威但不可导出为普通数据 | 系统安全存储 |
+| 安全材料 | `DeviceWrappingKey`、数据/附件/控制 key、令牌、P1 自带 Key | 权威但不可导出为普通数据 | 系统安全存储 |
 | 当前安装状态 | Installation ID、权限状态、平台调度 ID | 当前设备权威 | 安全存储/本地数据库/系统 |
 | 可重建数据 | 搜索索引、缩略图、今天投影、通知队列 | 非权威 | 本地缓存或系统队列 |
 | 当前会话临时数据 | 未保存表单、智能原始输入、临时附件 | 临时 | 内存或加密临时区 |
@@ -45,7 +45,7 @@
 
 - P0 领域数据库和附件是本机唯一业务事实源。
 - Redux、页面状态、搜索索引、系统通知、导出和备份不是在线编辑事实源。
-- 恢复成功后，恢复出的数据集成为新的本地事实源；原数据只作为短期回滚检查点保留。
+- 恢复成功后，恢复出的 generation 成为新的本地事实源；原 active 被封口为短期只读 previous generation。
 - P1 同步使用增量变更协议，不复制整个 SQLite 文件作为跨设备事实源。
 
 ## 3. 当前会话与临时数据
@@ -82,7 +82,7 @@
 - 默认个人空间及后续用户拥有/加入空间的可备份部分；
 - 记录根、五种类型详情和所有权威子对象；
 - 分类、标签、记录关联和用户模板；
-- 附件原始密文内容及必要元数据；
+- 权威原附件内容及其逻辑元数据；备份时由 TD-005 认证解密后直接送入 TD-011 外层加密流，不复制源设备附件密文、locator 或 key envelope；
 - 提醒计划、必要实例和业务去重状态；
 - 库存变化意图（含 pending/rejected）和已过账流水；projectedQuantityCache 可重建，不是必要唯一副本；
 - 回收站内容及 `trashedAt`、`purgeAfter`、`serverTrashedAt`、`serverPurgeAfter`；
@@ -95,7 +95,7 @@
 以下不从备份覆盖接收设备当前值：
 
 - Installation ID；
-- 数据库/附件设备主密钥；
+- `DeviceWrappingKey`、`DatabaseDataKey`、`AttachmentRootKey`、`DatasetControlKey` 及其设备本地 envelope；
 - 生物识别注册状态和系统凭据；
 - 操作系统通知、精确提醒、相册、相机和麦克风权限；
 - 系统通知平台调度 ID、渠道用户设置和已展示通知；
@@ -104,11 +104,11 @@
 - 智能数据说明确认（版本或地区变化时重新确认）；
 - 可重建搜索索引、缩略图、今天投影和普通缓存。
 
-恢复后使用当前设备新密钥重新保护数据，并重新检查所有权限。
+恢复后使用接收设备当前或为 candidate 新生成的 DatabaseDataKey/AttachmentRootKey 重新保护内容，保持接收设备 DatasetControlKey，并重新检查所有权限。
 
 ### DATA-022：系统自动备份排除
 
-数据库、附件、设备密钥和安全令牌必须从 iOS/Android 普通自动应用数据备份中排除，除非未来专门设计并验证兼容密钥恢复。原因：恢复密文却没有原设备安全密钥会产生无法打开的幽灵数据，也会绕过产品明确的加密备份流程。
+数据库、附件、`DeviceWrappingKey`/`DatabaseDataKey`/`AttachmentRootKey`/`DatasetControlKey`、设备 envelope 和安全令牌必须从 iOS/Android 普通自动应用数据备份中排除，除非未来专门设计并验证兼容密钥恢复。原因：恢复密文却没有原设备安全密钥会产生无法打开的幽灵数据，也会绕过产品明确的加密备份流程。
 
 用户可恢复路径是产品内版本化加密备份，P1 再增加明确的云备份。
 
@@ -121,7 +121,7 @@
 - 用户主动创建并选择保存位置；
 - 无账号、无网络也能创建和恢复；
 - 文件离开 App 私有目录后仍保持机密性和完整性；
-- 包含全部权威生活数据与附件；
+- 默认 `complete` 备份包含全部权威生活数据与所有 available 权威原附件；若预检发现 missing/corrupt，只有用户明确选择后才能生成 `recoverable_with_attachment_gaps`，仍保留其逻辑元数据但不得宣称“全部附件完整”；
 - 不包含设备主密钥、服务令牌、API Key、搜索索引或系统调度 ID；
 - 能在兼容版本的另一台设备恢复；
 - 创建成功前完成结构和解密验证。
@@ -129,18 +129,19 @@
 ### DATA-031：文件与格式
 
 - 推荐扩展名：`.lifebook`；
+- provider MIME hint：`application/vnd.life-book.backup`；扩展名/MIME 都不是信任依据；
 - 默认文件名：`生活有谱备份-YYYYMMDD-HHmm.lifebook`，只暴露产品名和创建时间，不含用户内容；
 - 文件使用版本化容器，不是裸数据库副本；
 - 公共头只包含识别与解密必需信息，不含记录数量、标题、附件名或账号；
-- 加密载荷包含 manifest、一致性数据库快照、附件和每个成员的完整性哈希；
-- 格式字段由 `specs/backup/manifest.schema.json` 唯一定义。
+- 加密容器由公共头、独立 AEAD-encrypted manifest 和一个 secretstream payload 构成；payload 只连续包含 portable SQLCipher DB、available 权威原附件和未来受控 non-critical extension member，没有成员路径、ZIP entry 或明文目录；
+- [`specs/backup/container-v1.md`](../specs/backup/container-v1.md)唯一负责 header offset、registry、AAD、member/chunk framing 与长度公式；[`specs/backup/manifest.schema.json`](../specs/backup/manifest.schema.json)唯一负责认证 manifest 字段与 Schema 条件；portable/active 物理表由持久化 Schema 文档负责。
 
 ### DATA-032：备份口令
 
 - 备份使用与设备解锁、账号密码和 App 锁独立的口令。
 - 最少 10 个 Unicode 码点，允许密码管理器生成/粘贴和显示确认；不强制复杂字符组合。
 - 创建时输入两次并一致，显示强度建议但不把常用句子静默上传检查。
-- 口令、派生密钥和解密密钥不写入数据库、日志、遥测或备份文件。
+- 口令和任何 raw/unwrapped key 不写入数据库、日志、遥测或备份文件；容器按 TD-011 必须携带 passphrase-wrapped `BackupRootKey` envelope 与 root-wrapped `SnapshotDataKey` slot，它们不是 raw key。
 - P0 不托管恢复密钥；忘记口令后无法恢复，创建和恢复页必须明确说明。
 - 用户可以把口令保存到其选择的系统密码管理器，但该操作独立于生活有谱备份。
 
@@ -155,46 +156,47 @@ P0 只提供“完整加密备份”，不允许用户通过取消勾选敏感�
 - 损坏/缺失附件的元数据与诊断标记；
 - 内容相关设置与版本。
 
-manifest 必须分别记录 pending StockChangeIntent 与未确认 SyncMutation 数量，供恢复预览和后续同步安全判断；projectedQuantityCache 不必备份，恢复后从确认账本和 pending 意图重建。
+manifest 必须分别记录 `state=pending` 的 StockChangeIntent 数量，以及 state 不为 `acknowledged` 的 SyncMutation 数量（精确集合以 manifest Schema 注释和领域状态机为准），供恢复预览和后续同步安全判断；projectedQuantityCache 不必备份，恢复后从确认账本和 pending 意图重建。
 
-不包含第三方系统模板的可再生成内容本体，但 manifest 记录所用模板 ID/版本；由用户修改的模板副本必须包含。
+不包含第三方系统模板的可再生成内容本体，但 manifest 记录 portable 数据实际引用的唯一 `(sourceTemplateId, sourceTemplateRevision)` 集合；不使用含义重叠的 `sourceVersion` 代替。由用户修改的模板副本作为用户模板完整包含。
 
 ### DATA-034：创建流程
 
 ```text
 检查可用空间与数据状态
-→ 用户设置并确认口令
-→ 生成数据库一致性快照
-→ 收集附件和 manifest
+→ 用户选择并准备 provider 目标，设置并确认口令
+→ 生成数据库一致性 capture
+→ 冻结权威附件集合并取得读取 lease，构建 portable 数据库与 manifest
 → 验证引用、大小和哈希
-→ 在临时位置流式加密容器
-→ 重新打开文件验证头、口令派生和载荷完整性
-→ 用户选择最终保存位置
-→ 原子完成并显示文件、时间、大小和验证结果
+→ 在私有且排除系统备份的 staging 流式加密容器
+→ 关闭、sync、重新打开并验证头、口令、manifest、全部 payload、唯一 FINAL 和 exact EOF
+→ 计算私有文件精确长度与 whole-container SHA-256，释放 snapshot/附件/维护 lease
+→ 写入并 commit 已选择的 provider 目标
+→ 关闭并重新打开目标，验证精确长度与 TargetContainerIdentity
+→ 记录成功并显示文件、时间、大小和验证结果
 → 清理所有临时明文/密文
 ```
 
-不得直接复制正在 WAL 模式运行的数据库文件；一致性快照方法由技术决策确定。
+provider selector/分享目标 UI 和口令确认必须在取得任何数据集 lease 前完成；取得 provider handle、私有 staging 验证完成或系统分享面板打开都不是成功。不得直接复制正在 WAL 模式运行的数据库文件；capture、lease、容器和目标身份算法分别遵循 TD-010、TD-011 及其规范性容器契约。
 
 ### DATA-035：空间和资源预检
 
 - 创建前估算数据库、附件、容器开销和临时空间；至少需要估算输出大小的 1.5 倍可用临时空间，具体实现可更严格。
 - 数据库完整性检查失败时停止并提供诊断，不生成“部分成功”的完整备份。
 - 附件缺失/损坏时列出不含敏感文件名的数量，让用户选择先修复或生成带明确缺失标记的备份；后者仍可恢复其余数据，但不能显示“全部完整”。
-- App 进入后台或空间不足时安全暂停/失败，已有本地数据不变。
+- 进程仍存活时可以在安全 chunk 边界暂停并继续；P0 进程被系统终止后删除 partial，从头重新创建，不保留可跨进程复用的 `BackupRootKey` 或续跑状态。
+- App 进入后台、空间不足或 provider 失败时安全暂停或失败；当前权威数据不因备份写入而改变。
 
 ### DATA-036：成功条件
 
 只有同时满足以下条件才记录备份成功：
 
-- 最终文件已关闭并在目标位置可读；
-- 公共头和格式版本合法；
-- 使用用户口令能解密 manifest；
-- manifest 中全部包含成员的大小和哈希验证通过；
-- 数据库快照通过一致性检查；
+- 私有 staging 已关闭、sync、重新打开，公共头、口令、manifest、全部成员、唯一 FINAL、exact EOF 和数据库一致性全部验证通过；
+- provider 写入与 commit 成功，目标已关闭；
+- provider 目标已重新打开，精确长度及 `TargetContainerIdentity` 与已验证私有 staging 完全一致；
 - 临时敏感文件已排队清理。
 
-仅“分享面板已打开”或“写出了一部分字节”不能算成功。
+仅“分享面板已打开”、provider 返回 handle、私有 staging 验证完成或写出了一部分字节都不能算最终成功。
 
 ## 6. P0 整体恢复
 
@@ -206,16 +208,17 @@ P0 恢复用备份中的完整数据集**整体替换**当前生活数据，不�
 
 用户选择文件后，按顺序验证：
 
-1. 文件魔数、容器与 KDF/加密版本是否受支持；
-2. 口令能否通过认证解密，错误口令不区分“文件不存在内容”等可被利用细节；
-3. 容器长度、成员路径、大小和哈希；
-4. manifest Schema 与数据库 Schema；
-5. App 是否足够新；
-6. 临时空间是否满足解密、迁移和回滚检查点；
-7. 数据库完整性、实体引用和附件引用；
-8. 所有必要迁移能否在临时副本完成。
+1. 按 TD-011 把 provider 来源稳定为私有 regular-file 密文 staging，并通过资源门限；
+2. 验证公共 magic、全部兼容选择器、声明长度和 hard limit；
+3. 处理口令并认证 root envelope；错误口令、root envelope 损坏和相关截断统一为 `backup_unlock_failed`；
+4. 认证并解析 canonical manifest，验证 Schema、required feature、成员计划和全文件精确长度；
+5. 第一遍认证全部成员、计长、哈希、唯一 FINAL 和 exact EOF，成功后才产生一次性的 `VerifiedBackupHandle`；
+6. 预检私有密文 staging、candidate、附件重加密和 previous generation 所需空间；
+7. 由该 handle 打开第二遍会话，把再次认证的字节写入可丢弃 candidate；只有完整结束才产生 `Pass2CompletionEvidence`；
+8. 防御性打开 portable 数据库，执行当前版本的迁移、实体/附件引用和全部业务不变量检查；
+9. 生成不含内容的恢复预览，并把它绑定到预期 active generation、mutation counter、当前/目标 notification epoch、candidate 与 completion evidence。
 
-任何失败都在替换前结束，当前数据保持字节级未改动。
+激活前任一失败都不得以 candidate 覆盖当前权威逻辑数据集。预检期间业务写入仍可改变 active；若最终独占门内发现 generation 或 mutation counter 不等于预览值，candidate 不得激活，必须重新预检并让用户再次预览。
 
 ### DATA-042：恢复预览
 
@@ -225,44 +228,47 @@ P0 恢复用备份中的完整数据集**整体替换**当前生活数据，不�
 - 五种记录、模板和附件数量；
 - active、archived、trashed 数量；
 - 总大小；
-- 是否有缺失/损坏附件标记；
+- `complete` 或 `recoverable_with_attachment_gaps` 状态，以及缺失/损坏附件数量；
+- 数据集绑定、provenance 和待处理库存/同步状态的非内容摘要；
 - 当前数据将被整体替换；
 - 当前系统权限、设备密钥和登录会话不会从备份覆盖；
 - 建议先为当前数据创建备份。
 
-需要应用锁或设备凭据再次认证，并执行明确覆盖确认。
+最终确认只执行一次 fresh 应用锁或设备凭据认证，并把认证、明确覆盖确认、preview digest、预期 generation/counter/notification epoch、candidate 和 `Pass2CompletionEvidence` 绑定为同一短时操作；任何变化都使确认失效。
 
 ### DATA-043：原子替换
 
 ```text
-保持当前数据只读可用
-→ 在私有临时区完整解密和迁移
-→ 为当前数据创建设备加密的内部回滚检查点
-→ 关闭业务写入和通知调度
-→ 对临时数据执行最终完整性检查
-→ 使用当前设备新密钥封装数据库和附件
-→ 原子切换活动数据目录/指针
-→ 打开新数据库并运行启动自检
-→ 清理旧系统通知
-→ 重建索引、缩略图和未来提醒
-→ 标记恢复完成
+VerifiedBackupHandle 第二遍认证并构建 candidate
+→ 取得 Pass2CompletionEvidence
+→ 防御性验证并 seal candidate
+→ 生成绑定预期 active generation/counter/evidence 的 preview
+→ 执行一次 fresh 认证和明确覆盖确认
+→ 取得独占激活门并重读、比较 generation/counter
+→ seal 旧 active 为 previous generation
+→ 写入 phase=validating 的认证 DatasetControlRecord
+→ 测试打开 candidate 并写入 activation marker
+→ 写入 phase=active 的认证 DatasetControlRecord
+→ 重新打开 candidate 数据库与 Repository
+→ 提交后重建索引、缩略图和未来提醒
 ```
 
-进程在切换前崩溃继续使用旧数据；切换后首次自检失败自动回滚内部检查点。不得让两个数据集混合可写。
+不另复制一份回滚检查点：切换时封口的旧 active 就是只读 previous generation。只有 `phase=active` 已持久化、candidate 可重新打开且 Repository 已开放后才返回恢复成功；搜索、缩略图或通知收敛失败进入 degraded reconciliation，不回滚已提交的数据集。`validating` 且不存在 activation marker 时，启动恢复可以用更高 `controlSequence` 回到 previous；marker 已存在时必须完成 candidate 激活或进入 integrity-blocked，`active` 后也不得静默回退。任何时刻都不得让两个 generation 混合可写。
 
-### DATA-044：内部回滚检查点
+### DATA-044：previous generation
 
-- 只用当前设备密钥加密，保存在 App 私有目录，不是用户备份。
-- 成功恢复并完成至少一次 App 重启自检后保留 7 天；用户可立即删除以释放空间。
-- 失败恢复自动回滚并保留诊断；成功后用户手动回滚仍需二次确认。
-- 清除本机数据和卸载会删除检查点。
-- 检查点不上传、不出现在系统分享面板。
+- previous generation 使用当前设备密钥加密，只读保存在 App 私有且排除系统备份的目录；它不是用户备份，不上传且不出现在系统分享面板。
+- 自动删除必须同时满足：`activatedAt + 7×24h` 已到、至少完成一次恢复后的冷启动自检、active 完整 gate 通过且没有任何读取/维护 lease。冷启动或清理任务迟到时实际保留可超过 7 天。
+- 用户可以重新认证并明确选择提前删除，以释放空间。
+- 自动回退只允许发生在 `phase=validating` 且 activation marker 尚未写入；marker 存在或 `phase=active` 后不得静默使用 previous。
+- 手动回滚把只读 previous 复制成新的 candidate，重新执行预检、preview、fresh 认证和 TD-010 激活；不得直接把 previous 改成可写 active。
+- 清除本机数据和卸载会删除 previous generation；空间管理、损坏隔离和 lease 规则由 TD-010 统一约束。
 
 ### DATA-045：恢复后的身份与设置
 
 - 恢复备份中的 LocalActor 和空间/记录 ID，保持创建人引用。
 - 保持接收设备当前 Installation ID。
-- 使用接收设备新生成/现有的数据主密钥重新加密。
+- 不恢复源设备的 `DeviceWrappingKey`、`DatabaseDataKey`、`AttachmentRootKey` 或 `DatasetControlKey`；candidate 使用接收设备当前或新生成的 `DatabaseDataKey`/`AttachmentRootKey` 重新保护内容，并保持接收设备现有 `DatasetControlKey`。
 - 保持当前系统权限、应用锁认证能力、账号会话和遥测同意；不从备份打开权限。
 - 用户内容偏好可以恢复，但智能说明或法律同意版本过期时重新确认。
 - P1 已登录且备份属于其他账号时停止自动同步，先进入认领/冲突流程。
@@ -270,42 +276,50 @@ P0 恢复用备份中的完整数据集**整体替换**当前生活数据，不�
 
 ### DATA-046：恢复后的提醒
 
-- 不恢复平台调度 ID或“已展示”假设。
-- 清理当前 App 已安排的旧系统通知，再从恢复出的计划重建。
+- 不恢复平台调度 ID 或“已展示”假设。
+- 激活必须在同一受认证控制记录转换中检查并加一 `notificationDatasetEpoch`；旧 epoch 的通知投递回调和用户 action 在任何清理之前就永久 no-op。
+- 提交后定向清理当前 App 已安排的旧通知，再从恢复出的计划强制重建；清理或重建失败进入 degraded reconciliation，不回滚已提交恢复。
 - 已过去且从未安排的提醒按 REM-032 不补发洪水。
 - 通知/精确提醒权限不具备时保存计划并显示等待权限。
 - 恢复完成页显示提醒对账水位和任何无法安排数量。
 
 ### DATA-047：取消和失败
 
-- 口令输入、预检和预览阶段都可以安全取消。
-- 进入原子切换后不可由普通返回手势中断；显示确定进度并在系统允许时使用受控后台完成。
-- 错误口令、文件损坏、不支持版本、空间不足和迁移失败使用不同用户可理解文案，但日志只含错误码。
-- 失败后验证当前数据仍可打开；若当前数据本来已损坏，不能把它描述为恢复导致。
+- 口令输入、第一遍认证、第二遍认证、candidate 构建/验证和预览阶段都可以在安全 chunk/batch 边界取消；删除未提交 candidate 和 operation-scoped key handle。
+- 一旦取得激活独占门，普通返回或迟到取消不再改变结果；该临界段只能收敛到旧 active、新 active 或 integrity-blocked，不能把已提交的新数据集报告为 canceled。
+- KDF 前可区分格式/版本不支持；root envelope 认证前，错误口令、envelope 篡改和相关截断统一显示 `backup_unlock_failed`。只有 root 已认证后的损坏才可分类为文件损坏；空间不足和迁移失败使用各自用户文案，日志只含错误码和非内容诊断。
+- 激活前失败不以 candidate 覆盖当前权威逻辑数据集；若当前数据原本已损坏，不能把它描述为恢复导致。
 
 ## 7. 备份兼容策略
 
-### DATA-050：三类版本
+### DATA-050：兼容选择器
 
-| 版本 | 作用 |
+| 选择器 | 产品级作用 |
 | --- | --- |
-| `containerFormatVersion` | 文件头、KDF 和认证加密封装。 |
-| `manifestSchemaVersion` | 备份成员、哈希和元数据字段。 |
-| `dataSchemaVersion` | 领域数据库和附件元数据结构。 |
+| `headerVersion` | 公共头布局与 offset。 |
+| `containerFormatVersion` | member/payload framing。 |
+| `suiteId` | AEAD、HKDF、secretstream 与 AAD 投影组合。 |
+| `passphraseProfileId` | 口令 Unicode/PRECIS 处理规则。 |
+| `kdfProfileId` | 口令 KDF 算法与参数档。 |
+| `manifestSchemaVersion` | 认证 manifest 的核心字段与条件。 |
+| `portableDataSchemaVersion` | 备份内 portable 数据模型；接收端必须有兼容 reader/migration。 |
+| `portableCipherProfileId` | portable 数据库密文档位。 |
+| `scalarEncodingVersion` | ID、时间、计数器等跨平台标量编码。 |
+| `databaseSchemaVersion` | 接收设备 active 数据库内部目标版本，不是备份输入格式选择器。 |
 
-三者独立升级。App 必须先判断容器可解密，再判断 manifest 和数据能否迁移。
+选择器各自独立演进，具体 registry、匹配顺序和升级条件由 TD-011 与 `container-v1.md` 唯一定义，manifest 中可认证字段由 manifest Schema 定义，portable/active 物理 Schema 与迁移由持久化 Schema 文档定义。App 必须先安全判断公共格式与资源门限，再认证容器，最后判断 portable 数据能否迁移到当前 `databaseSchemaVersion`。
 
 ### DATA-051：向后恢复
 
 - 每个公开版本必须恢复当前格式及所有仍受支持旧 App 产生的备份。
 - P0 正式版产生的 v1 容器至少在整个 1.x 产品生命周期保持可恢复；内部数据通过迁移升级。
-- 停止支持某旧容器前至少提前两个公开版本和 6 个月说明，并提供可在旧版本生成新格式或独立转换的路径。
+- 停止支持某旧格式前必须同时满足“已提前至少两个公开版本通知”和“已提前至少 6 个月通知”；生效日不得早于两项门槛中较晚的日期，并提供可在旧版本生成新格式或独立转换的路径。
 - 自动化测试保存每个已发布格式的去敏 fixture，所有后续发布候选都执行恢复。
 
 ### DATA-052：未来备份
 
 - 旧 App 遇到更高容器或必要 Schema 版本时只显示“请升级生活有谱后恢复”，不得尝试猜测。
-- 未知可选成员可以保留/忽略时由 manifest 声明；未知必要成员必须拒绝恢复。
+- 未知 non-critical member 只有在按成员计划完整认证、计长并校验哈希后才可丢弃；未知 required member 必须拒绝恢复。
 - 不允许降级 App 直接打开高版本活动数据库。
 
 ## 8. 未加密导出
@@ -429,10 +443,10 @@ PDF 不是 P0 全量可阅读导出的唯一格式，因为大量内容与附件
 清除本机数据删除：
 
 - 本地领域数据库、附件、模板副本和回收站；
-- 内部恢复检查点、搜索索引、缩略图和临时文件；
+- previous/candidate generation、搜索索引、缩略图和临时文件；
 - 本地身份、内容偏好和提醒计划；
 - 系统通知调度；
-- 当前设备数据主密钥和 P1 用户选择删除的本地令牌/自带 Key。
+- 当前设备 `DeviceWrappingKey`、`DatabaseDataKey`、`AttachmentRootKey`、`DatasetControlKey` 及 P1 用户选择删除的本地令牌/自带 Key。
 
 不删除用户保存在文件、云盘或聊天中的加密备份/未加密导出，也不自动删除 P1 云端账号数据，除非用户另外执行账号删除。
 
@@ -442,8 +456,8 @@ PDF 不是 P0 全量可阅读导出的唯一格式，因为大量内容与附件
 2. 展示范围、最近成功备份时间和“不会删除外部副本/云端账号”的说明；
 3. 要求输入本地化确认词或执行等强度确认；
 4. 取消所有系统通知；
-5. 关闭数据库并删除活动数据、临时区和内部检查点；
-6. 销毁设备数据密钥；
+5. 关闭数据库并删除 active/previous/candidate generation 与临时区；
+6. 销毁 `DeviceWrappingKey`、`DatabaseDataKey`、`AttachmentRootKey` 和 `DatasetControlKey`；
 7. 生成新的 LocalActor 和空默认个人空间；
 8. 保持当前 Installation ID，但重置产品使用计数；
 9. 运行空数据自检后回到首次空状态。
@@ -499,7 +513,7 @@ PDF 不是 P0 全量可阅读导出的唯一格式，因为大量内容与附件
 
 - 每次 Schema 变化有单调递增版本和显式前向迁移。
 - 迁移在副本或受事务保护路径执行；失败不得创建空库覆盖原库。
-- 迁移前检查空间，必要时创建设备加密检查点。
+- 迁移前检查空间，在独立 candidate generation 执行；旧 active 只在提交时封口为 previous，不创建临时拼装的检查点。
 - 迁移脚本可重复检测已完成状态，不执行两次破坏性转换。
 - 大迁移显示进度、可恢复标识和诊断码。
 
@@ -514,7 +528,7 @@ PDF 不是 P0 全量可阅读导出的唯一格式，因为大量内容与附件
 - StockChangeIntent/StockTransaction 一对一、账本序列与确认余额不变量；
 - 回收站四个时间字段及有效清理期限；
 - SyncMutation.snapshotGeneration 与绑定状态；
-- 附件路径、大小和哈希；
+- 附件 ID、locator、状态、大小、哈希和加密根引用；任何用户/provider 原路径都不得成为持久字段；
 - 提醒计划可重算；
 - 未知枚举安全失败；
 - 从旧 fixture 升级、备份、恢复再打开的往返。
@@ -553,7 +567,7 @@ P0 不支持直接把活动数据库降级到旧 Schema。用户需要回到旧 
 | 未绑定回收站记录 | 本地 trashedAt 后 30×24 小时，之后在 App 获得运行机会时清理。 |
 | 绑定回收站记录 | 服务端 serverTrashedAt 后 30×24 小时；未确认前不永久清理。 |
 | 加密临时附件 | 无引用最多 24 小时。 |
-| 内部恢复回滚检查点 | 成功自检后最多 7 天。 |
+| previous generation | `activatedAt + 7×24h`、后续冷启动自检、active 完整 gate 和无 lease 全部满足后才具备自动删除资格；实际可超过 7 天，用户可重新认证后明确提前删除。 |
 | 当前智能创建会话 | 当前进程/会话，退出确认后清除。 |
 | 搜索索引和缩略图 | 只要对应数据存在，可随时重建/清除。 |
 | 系统通知投递诊断 | 由安全与遥测规范限定，不进入用户备份。 |
@@ -567,17 +581,19 @@ P1/P2 服务端期限必须结合发行地区、运营主体、供应商和端�
 
 - 空数据、最大设计容量、全部五类记录、敏感内容、回收站、损坏附件；
 - 正确/错误口令、Unicode 长口令、密码管理器粘贴；
-- 创建中断、App 被杀、目标文件系统拒绝和空间不足；
-- 最终文件重新打开、哈希、数据库一致性和临时文件清理；
-- 文件名和公共头不泄露内容。
+- 创建中断、App 被杀后不能续跑、目标 provider 拒绝、commit/close/reopen 失败和空间不足；
+- complete 与明确 gap 备份、私有 staging/目标精确长度和 `TargetContainerIdentity` 相等、数据库一致性及临时文件清理；
+- 文件名和公共头不泄露内容或计数。
 
 ### DATA-131：恢复测试
 
 - 干净安装、有现有数据、应用锁开启、权限拒绝、旧格式和未来格式；
-- 损坏头、截断载荷、路径穿越、重复成员、哈希不符和恶意超大尺寸声明；
-- 迁移失败、切换前崩溃、切换后首次自检失败和自动回滚；
+- 损坏头、截断载荷、manifest 意外路径字段、symlink staging、重复成员、哈希不符和恶意超大尺寸声明；
+- 第一遍前不能取得 handle、两遍间替换/关闭/修改 staging 的 TOCTOU、第二遍没有 completion evidence 不能 preview/activate；
+- 迁移失败、`validating` 无 marker、marker 已写和 `active` 已写三段崩溃边界，以及迟到取消不改变确定终态；
 - Installation/LocalActor 语义、密钥重封装、索引和提醒重建；
-- 当前数据在每类失败后不变。
+- 旧 `notificationDatasetEpoch` 回调/action 永久 no-op；通知、搜索、今天投影、索引或缩略图重建失败只产生提交后 degraded reconciliation；
+- 只有 Repository 可重新打开才报告成功；激活前每类失败都不以 candidate 覆盖 active。
 
 ### DATA-132：删除与迁移测试
 
@@ -593,5 +609,6 @@ P1/P2 服务端期限必须结合发行地区、运营主体、供应商和端�
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.2 | 2026-07-26 | 对齐两遍认证、provider 目标身份、previous generation、通知 epoch、取消/成功边界及完整兼容选择器。 |
 | v1.1 | 2026-07-26 | 对齐库存意图/权威流水、同步恢复 generation、导入 ID 映射、服务端回收站时钟和无内容墓碑。 |
 | v1.0 | 2026-07-26 | 定义本地数据集、临时数据、版本化加密备份、原子恢复、未加密导出、P1 导入、删除清理、云端扩展和迁移兼容。 |
