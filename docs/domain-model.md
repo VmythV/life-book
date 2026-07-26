@@ -1,6 +1,6 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.3 · 更新日期：2026-07-26 · 状态：领域基线
+> 项目代号：`life-book` · 版本：v1.4 · 更新日期：2026-07-26 · 状态：领域基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
@@ -121,7 +121,8 @@ P0 初始化时分别生成当前安装和本地作者身份：
 | `kind` | `personal \| family` | 创建后不可直接改变。 |
 | `name` | 文本 | P0 默认显示“个人空间”；家庭可自定义。 |
 | `ownerId` | `EntityId?` | personal 时必填，P0 指 LocalActor、认领后可指 Account；family 时为空，唯一 owner 由 active SpaceMembership 表达。 |
-| `status` | `active \| deleting \| deleted` | 个人空间不得进入 deleted；家庭删除按 P2 流程。 |
+| `status` | `active \| deletion_scheduled \| deleting \| deleted` | 个人空间固定 active；家庭删除按 P2 流程。 |
+| `deletionScheduledFor` | `Instant?` | family/deletion_scheduled 时必填；取消删除后清空。 |
 | 公共元数据 | `EntityMeta` | 适用。 |
 
 #### DOM-001：默认个人空间
@@ -524,8 +525,11 @@ active ⇄ archived
 | `occurredAt` | `Instant` | 操作发生时间。 |
 | `summary` | 结构化元数据 | 只含字段类别或数量变化，不保存完整正文。 |
 | `clientMutationId` | `EntityId?` | P1 幂等与追踪。 |
+| `authority` | `local \| server_verified` | 家庭权限、成员和高风险操作必须由服务端核验后记为 server_verified。 |
+| `serverSequence` | `ServerSequence?` | 同步空间中的可信顺序。 |
+| `actorDisplaySnapshot` | 文本? | 家庭历史可选的当时显示名；不是身份或鉴权依据。 |
 
-P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录在此基础上开放用户可见审计。
+P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录在此基础上开放用户可见审计。AuditEvent 创建后不可编辑；客户端可以请求业务操作，但不能自行宣称一个未被服务器接受的家庭审计事实。
 
 ### 16.2 `Account` 与 `AuthenticationIdentity`
 
@@ -609,7 +613,7 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 | `invitedByAccountId` | `EntityId?` | 家庭邀请来源。 |
 | 公共元数据 | `EntityMeta` | 角色和状态变化产生服务端审计。 |
 
-`Invitation` 包含家庭空间、邀请者、目标角色、tokenHash、状态 `draft | active | accepted | revoked | expired`、过期时刻、接受账号和服务端时间。明文 token 只在创建时返回，不保存、不写日志；同一邀请最多接受一次。
+`Invitation` 包含家庭空间、邀请者、目标角色、tokenHash、状态 `draft | active | accepted | revoked | expired`、过期时刻、接受账号、接受/撤销时间和服务端版本。明文 token 只在创建时返回，不保存、不写日志；同一邀请最多接受一次。
 
 ### 16.6 同步元数据
 
@@ -675,6 +679,52 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 
 `CloudBackup` 只保存恢复副本的管理元数据：accountId、可选 spaceId、备份 ID、创建设备、createdAt、formatVersion、schemaVersion、byteSize、contentHash、状态 `creating | available | deleting | deleted | failed` 和可选恢复 generation。备份内容、加密和恢复语义仍以数据生命周期与备份契约为准；CloudBackup 不携带 SyncCursor，也不冒充实时同步点。
 
+### 16.10 `OwnershipTransfer`
+
+家庭所有权转移是独立双人确认流程：
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `spaceId` | `EntityId` | 必须是 active family 空间。 |
+| `fromAccountId`、`toAccountId` | `EntityId` | 发起时分别是唯一 active owner 和 active member。 |
+| `state` | `proposed \| awaiting_target \| accepted \| declined \| expired \| cancelled` | 只有 awaiting_target 可以接受/拒绝。 |
+| `expiresAt` | `Instant` | 到期后不可接受。 |
+| `createdAt`、`respondedAt` | `Instant`、`Instant?` | 使用服务端时间。 |
+| `initiatorReauthenticatedAt`、`recipientReauthenticatedAt` | `Instant`、`Instant?` | 接受时双方都必须满足近期认证。 |
+| `baseMembershipVersions` | 版本对 | 防止成员状态变化后完成旧转移。 |
+
+accepted 不是先改一人再改另一人的中间态；服务端一次事务交换两条 membership role、增加空间版本并写入审计，任何可见状态都必须恰好一个 owner。
+
+### 16.11 `ReminderSubscription`
+
+ReminderPlan 属于家庭业务记录；`ReminderSubscription` 决定哪个 Account 的哪些设备接收投递：
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `spaceId`、`reminderPlanId`、`recipientAccountId` | `EntityId` | 组合唯一，recipient 必须是 active member。 |
+| `mode` | `all_active_devices \| selected_devices \| off` | 默认由家庭规范决定。 |
+| `selectedDeviceIds` | ID 集合 | selected_devices 时至少一个，且都属于 recipient。 |
+| `origin` | `creator_default \| user_opt_in \| assignment` | 解释订阅来源，不作为权限。 |
+| `status` | `active \| cancelled` | 成员离开、计划失效或空间删除时取消。 |
+| 公共元数据 | `EntityMeta` | 修改只影响该收件人，不改业务时间。 |
+
+不同成员的订阅不复制 ReminderPlan 或 ReminderInstance。一个成员处理共享业务状态后，各订阅设备通过同步取消适用未来投递。
+
+### 16.12 `SpaceTransferOperation`
+
+跨空间移动不是直接改 spaceId，而是可恢复的协调对象：
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `recordId`、`sourceSpaceId`、`targetSpaceId` | `EntityId` | 两空间不同；发起时记录属于 source。 |
+| `initiatedByAccountId` | `EntityId` | 必须同时有来源操作权和目标创建权。 |
+| `state` | `preflight \| awaiting_confirmation \| transferring \| committed \| failed_retryable \| rolled_back` | committed 前记录不能在两空间同时可写。 |
+| `baseRecordVersion`、`baseSpaceVersions` | 版本 | 防止预览后对象或成员资格改变。 |
+| `mappingPlan` | 结构化选择 | 分类、标签、关联、提醒和审计处理选择；不复制正文。 |
+| `startedAt`、`completedAt` | `Instant`、`Instant?` | 服务端时间。 |
+
+附件密钥和内容重归属、聚合子对象、目标 membership 与源 move tombstone 必须作为一个可回滚逻辑提交；物理传输可以分步，但在 committed 前目标不可见、来源保持唯一可写。
+
 ## 17. 聚合事务边界
 
 以下操作必须在一个领域事务中完成：
@@ -738,6 +788,14 @@ LocalActor 被 Account 认领后保留原 ID，既有 createdByActorId、updated
 
 永久删除墓碑优先于基于旧版本的创建、编辑、恢复或同步重试。任何自动合并都不得复活已永久删除 ID；合法重新创建必须获得新 ID。
 
+### DOM-091：家庭唯一所有者
+
+每个 active 或 deletion_scheduled 的家庭空间必须恰好有一个 active SpaceMembership(role=owner)。创建、所有权转移、owner 退出和家庭删除必须在服务端串行化，不能出现零 owner 或两个 owner 的可见中间态。
+
+### DOM-092：家庭订阅不等于业务归属
+
+ReminderSubscription 只控制某成员设备是否投递，不改变 ReminderPlan、记录、发生项或完成状态。成员退出时取消其订阅；其他成员订阅和共享业务对象继续存在。
+
 ## 19. 领域命令和结果
 
 领域层以显式命令改变数据，至少包括：
@@ -778,6 +836,7 @@ LocalActor 被 Account 认领后保留原 ID，既有 createdByActorId、updated
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.4 | 2026-07-26 | 明确家庭空间所有者来源与删除计划，并增加所有权转移、成员提醒订阅、跨空间移动和服务端可信审计实体。 |
 | v1.3 | 2026-07-26 | 完整定义账号、认证身份、设备会话、数据集绑定、成员关系、同步元数据、冲突、墓碑、附件传输和云备份逻辑实体。 |
 | v1.2 | 2026-07-26 | 在规则段保存重复引擎版本，保证备份、迁移和同步可以重现历史候选。 |
 | v1.1 | 2026-07-26 | 增加清单用途与低库存周期解决原因，以支持采购清单选择和归档/删除状态。 |
