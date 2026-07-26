@@ -1,6 +1,6 @@
 # 生活有谱提醒与系统通知规范
 
-> 项目代号：`life-book` · 版本：v1.5 · 更新日期：2026-07-26 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.6 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：提醒计划、提醒实例、系统调度、通知动作、去重、权限、降级和可靠性边界
 >
@@ -46,7 +46,9 @@
 ReminderPlan（长期意图）
     ↓ 根据业务发生项与时间规则展开
 ReminderInstance（一次逻辑提醒）
-    ↓ 调度器尝试提交
+    ↓ current-epoch 对账选择
+NotificationSchedulingDecision（逐设备选择/阻断投影）
+    ↓ eligible_selected 才尝试提交
 NotificationDelivery（一次平台提交/取消尝试）
     ↓ 操作系统可能展示
 NotificationResponse（用户动作回调，若系统提供）
@@ -87,9 +89,10 @@ scheduled ──┴──空间/订阅暂停──→ paused ──恢复且仍�
 
 规则：
 
-- ReminderInstance 状态属于收件人范围内的逻辑生命周期，不表示“本设备通知正常”；每台设备的已安排、近似、等待权限、容量不足和失败只从该设备 NotificationDelivery 派生；
-- P0 当前 installation 有一个 current-epoch、未失效 `accepted` delivery 时实例可进入 scheduled。P1 同一实例跨多个 Device 共享，至少一个当前适用设备有其 current-epoch、未失效 `accepted` delivery 时可聚合为 scheduled；单台设备失败不得把共享实例改成 failed；
-- 只有当前收件人范围内全部适用设备都出现不可重试的技术拒绝、且没有 accepted 或待重试投递时，实例才可进入 failed。权限未询问/拒绝、渠道关闭、预算不足和暂时无活跃设备仍保持 planned，并用设备投递/可观察原因解释；
+- ReminderInstance 状态属于收件人范围内的逻辑生命周期，不表示“本设备通知正常”；本设备的已安排/近似来自 Delivery，等待权限/渠道/容量和失败来自 REM-014 Decision，整体水位来自 ReconciliationState，三者不得互相冒充；
+- P0 当前 installation 同一投递身份的最新 attempt 在 epoch、platformRequestId、fingerprint、precision、environment/capability generation 和 adapter contract 全匹配且 `status=accepted` 时，实例才可进入 scheduled；证据失效而实例仍有效时回到 planned 等待对账；
+- P1 跨 Device 的 scheduled/failed 只能由 TD-020/022 定义的 server-owned、无内容 `ReminderDeliveryAggregate` 按适用设备集合、失活期限和并发规则聚合。该合同落地前客户端只展示当前 installation 状态，不得根据本机 device-only 行写共享聚合状态；单台设备失败永远不能把共享实例改成 failed；
+- P0 只有当前 installation 出现不可重试技术拒绝且没有 accepted 或待重试 attempt 时才可进入 failed；P1 只有服务端聚合确认全部当前适用设备满足同一条件时才可进入 failed。权限未询问/拒绝、渠道关闭、预算不足和暂时无活跃设备仍保持 planned，并由 Decision 解释；
 - `scheduledFor <= now` 且仍 scheduled 只表示“已经到时且未确认”，不是可可靠观测的 delivered 状态；
 - 收到前台通知回调可以记录 delivery observed，但不自动 acknowledged；
 - 用户从通知中心清除通知通常不可可靠观测，不得据此完成或确认业务；
@@ -97,7 +100,7 @@ scheduled ──┴──空间/订阅暂停──→ paused ──恢复且仍�
 - failed 在问题解决且来源仍有效时可以回到 planned；
 - planned/scheduled 可以在空间待删除或 subscription 临时暂停时进入 paused；暂停会取消平台请求但保留实例 ID 和 deduplicationKey。恢复时 scheduledFor 仍在未来则回 planned，已到时则转 expired，禁止补发。
 
-整体 dataset restore/manual rollback 不恢复 `NotificationDelivery`、`NotificationActionInbox`、平台 ID、reconcile task/checkpoint/watermark。`scheduled`/`failed` 依赖设备投递证据：来源仍有效且目标在未来时重置为 `planned`，过去按 REM-032 且不补发；`acknowledged`、`snoozed`、`cancelled`、`expired` 终态保留；`paused` 仅在暂停原因仍成立时保留，否则按未来/过去重新判断。普通 schema/cipher migration 保持 epoch、合法同 epoch Delivery 和实例状态，不执行此规范化。
+整体 dataset restore/manual rollback 不从源 dataset/candidate 导入 `NotificationDelivery`、`NotificationActionInbox`、`NotificationSchedulingDecision`、`NotificationReconciliationState`、平台 ID 或旧 reconcile task/checkpoint/watermark。来源按 REM-021 已失效时转 `cancelled`；`acknowledged`、`snoozed`、`cancelled`、`expired` 业务终态保持；`paused` 仅在原因仍成立时保持，否则未来转 `planned`、过去转 `expired` 并清 `pauseReason`。其余 `scheduled`/`failed` 若来源仍可操作，未来转 `planned`，过去也转 `planned` 并由 `scheduledFor <= now` 派生 application-only 待查看/逾期，reconciler 永不补发该过去目标；过去且来源已不可操作时转 `expired`。所有 `scheduled`/`failed` 规范化都清技术 `failureCode`。TD-010 另建 dormant target-epoch force task 并在 activation-marker transaction 激活；普通 schema/cipher migration 保持 epoch、合法同 epoch 设备投影和实例状态，不执行此规范化。
 
 ### REM-013：通知投递状态
 
@@ -113,9 +116,15 @@ scheduled ──┴──空间/订阅暂停──→ paused ──恢复且仍�
 | `rejected` | 平台拒绝，保存受控错误码。 |
 | `missing` | 本地期望存在，但平台可提供的 managed pending/登记证据中缺失。 |
 
-同一提醒实例可以有多个设备、每个设备可以有多个投递尝试；每个设备槽位只有一个当前有效 `platformRequestId`。投递必须记录 `notificationDatasetEpoch`、TD-006 LongCounter `attemptSequence`、`scheduleFingerprint`、精度、环境 generation、adapter contract version 和证据类型；Android 的 registry 条目只能作为 `android_registry_only` 证据，不能单独证明 AlarmManager 接受。
+同一提醒实例可以有多个设备、每个设备可以有多个投递尝试；同一 `(ReminderInstance, installation/device slot, transport, platform/recipientSlot)` 同时至多一个 current `platformRequestId`，同一 request 可有多个 `attemptSequence`。投递必须记录 `notificationDatasetEpoch`、TD-006 LongCounter `attemptSequence`、`scheduleFingerprint`、精度、环境 generation、adapter contract version 和证据类型；Android 的 registry 条目只能作为 `android_registry_only` 证据，不能单独证明 AlarmManager 接受。
 
-只有 epoch、platformRequestId、fingerprint、precision、environment generation 和 adapter contract 全部匹配当前值的最新 `accepted` attempt 才是当前证据。旧 epoch 的 observed trigger/action 不得更新当前 Delivery 或 ReminderInstance；平台内部 ID 只能作为本机清理 metadata，不能取代项目生成的 `platformRequestId`。
+同一身份的最新 attempt 必须存在，且其 `status=accepted`、epoch、platformRequestId、fingerprint、precision、environment/capability generation 和 adapter contract 全部匹配当前值，才是当前证据；最新 attempt 为 requested/rejected/missing/cancelled 时，较早 accepted 永不生效。旧 epoch 的 observed trigger/action 不得更新当前 Delivery 或 ReminderInstance；平台内部 ID 只能作为本机清理 metadata，不能取代项目生成的 `platformRequestId`。
+
+### REM-014：逐实例调度决策
+
+权限预检、channel 阻断和预算淘汰不会调用平台，因此不得伪造 NotificationDelivery。每轮对账为每个设备候选生成 device-only `NotificationSchedulingDecision`，身份绑定 `(installationId, notificationDatasetEpoch, platform, reminderInstanceId, reconciliationRunId)`，至少记录 `platformRequestId?`、`scheduleFingerprint`、`decision`、受控 `reasonCode?`、`requestedPrecision`、`environmentGeneration`、`inputFingerprint` 和 `computedAt`。
+
+`decision` 固定为 `eligible_selected | permission_blocked | channel_blocked | capacity_deferred | unsupported | retryable_error | terminal_error`。exact 权限拒绝但已降级选择 approximate 时使用 `eligible_selected + requestedPrecision=approximate`，不写成阻断。Decision 可以作为 dormant run 临时行写入，但只有 REM-101 最终 guard-CAS 将 `NotificationReconciliationState.publishedRunId` 切到该 run 后才可见；未发布、非 current epoch 或不匹配当前合同的行不得驱动 UI，也不进入 portable backup、业务同步或用户导出。
 
 ## 3. 提醒来源与 P0 能力
 
@@ -255,17 +264,18 @@ P0 只有用户明确开启后才创建 `FollowUpPolicy`：
 | `memo` | 1 | 1 | `acknowledge`、`snooze`、`open` | AcknowledgeReminder(noted) / SnoozeReminder / navigation |
 | `important_date` | 1 | 1 | `acknowledge`、`snooze`、`open` | AcknowledgeReminder(noted) / SnoozeReminder / navigation |
 | `low_stock` | 1 | 1 | `add_to_shopping`、`acknowledge`、`open` | AddItemToShoppingChecklist / AcknowledgeReminder(noted) / navigation |
+| `open_only` | 1 | 1 | `open` | navigation |
 
-`categoryContractId + categoryContractVersion` 共同标识类别合同；平台 category identifier 由 adapter 的版本化登记表映射，不作为领域身份。类别或动作语义改变时增加对应合同版本，旧版本 parser 只按已发布 allowlist 解释或安全清理，不把未知值映射成当前动作。
+`categoryContractId + categoryContractVersion` 共同标识类别合同；平台 category identifier 由 adapter 的版本化登记表映射，不作为领域身份。敏感通知固定使用 `open_only`，payload 不携带来源类别。类别或动作语义改变时增加对应合同版本，旧版本 parser 只按已发布 allowlist 解释或安全清理，不把未知值映射成当前动作。
 
 ### REM-061：动作鉴权与锁屏
 
-- 所有带目标的 response（包括默认“打开”）先做 bounded parse，校验 payload 大小/结构、必填合同版本、受控 ID 格式及 category/action allowlist；未知或不兼容输入不入箱、不执行命令。通过后再取得绑定 current active generation + `notificationDatasetEpoch` 的 TD-010 `DatasetReadLease`；control 非 active、Repository 未开放或无法取得 lease 时不得继续。
-- payload epoch 必须等于 current control，随后按 TD-009 重算并恒时比较 `lbr2:` platformRequestId；只有通过后才能以稳定幂等键写入加密 `NotificationActionInbox`。旧/缺失/非法/future epoch 不得先入箱。
+- 所有带目标的 response（包括默认“打开”）先做 bounded parse，校验 payload 大小/结构、必填合同版本、受控 ID 格式及 category/action allowlist；未知或不兼容输入不入箱、不执行命令。通过后取得绑定 current active generation + epoch 的短 `DatasetReadLease A`，要求 payload epoch 等于 current control，再按 TD-009 重算并恒时比较 `lbr2:` platformRequestId；只有通过后才能在短事务写入加密 `NotificationActionInbox`，随后立即释放 Lease A。旧/缺失/非法/future epoch 不得先入箱。
 - P0 所有完成、跳过、知道了、稍后和加入采购清单等改变领域状态的快捷动作都只打开 App；平台认证/破坏性标记只作附加防护，不能成为执行授权。
-- 入箱后经过 SCR-002 应用锁、当前空间授权和最新来源状态，再转换成领域命令；命令提交前再次验证 lease + epoch，变化时消费 inbox、业务 mutation、幂等结果和后续 reconcile task 全部回滚。
+- 等待 SCR-002 应用锁或用户交互期间不得持有 DatasetReadLease。解锁后、读取目标前取得绑定 then-active generation + epoch 的 fresh `DatasetReadLease B`，重新验证 inbox epoch、platformRequestId、category、当前空间授权和最新来源状态；无法取得或任一值变化时不导航目标、不产生 mutation，按 stale 安全处置。
+- mutating action 在 Lease B 下以单一领域事务消费 inbox、写业务 mutation/幂等结果和后续 reconcile task；提交前 epoch/lease 变化则整体回滚。默认 `open` 也必须在紧邻目标导航前通过 Lease B，不能复用解锁前的 fence。
 - 敏感通知只显示“打开”，不在锁屏提供其他动作；通知 payload 不包含敏感内容。
-- 动作回调验证 category/action contract ID 与版本、实例、来源当前状态和幂等键，不能信任客户端按钮名称；默认“打开”也只有通过 fence 后才可导航到不透明目标。
+- 动作回调验证 category/action contract ID 与版本、实例、来源当前状态和幂等键，不能信任客户端按钮名称。
 
 ### REM-062：迟到和重复回调
 
@@ -276,6 +286,7 @@ P0 只有用户明确开启后才创建 `FollowUpPolicy`：
 - 同一动作被 iOS/Android 重放只执行一次。
 - old、missing、malformed 或 future dataset epoch 不创建 ActionInbox、不更新 Delivery、不打开目标、不产生 mutation；最多打开无目标首页，清除 last response 并定向清理对应通知。
 - current-epoch response 在入箱后若来源已经终态、删除、失权或动作过期，以 `business_noop` 完成并返回当前状态；不能回退执行旧语义。
+- control 为 `validating`、integrity-blocked 或 Repository 未开放时，语法合法但尚不能分类的 response 标记 `deferred_unclassified`：只做 bounded parse 和平台要求的 completion acknowledgement，不入箱、不清 last response/目标通知、不导航，回到 active 后从头 fence。平台无法保留时只能进入无目标首页并记录无内容诊断，不得伪装成 `business_noop`。
 
 ### REM-063：前台通知
 
@@ -310,6 +321,8 @@ App 正在前台且用户正在查看同一对象时，不重复展示系统横�
 - 可选 `spaceId`（P2，仍为不透明值）。
 
 不得包含记录正文、清单项目、物品名、精确数量、附件路径、API Key、账号邮箱或可直接使用的长期认证令牌。
+
+敏感通知固定使用 `sourceType=hidden`、`sourceId=null`、`categoryContractId=open_only`，并省略 `spaceId`；解锁后只用 `reminderInstanceId` 在 fresh Lease B 下反查当前授权目标，不能让 payload 暴露记录类型或空间关系。
 
 缺失、非法、溢出或未知 `notificationDatasetEpoch` 不得解释成 `0`；未知 payload/request/category/action contract 只能无目标打开与安全清理，不能执行领域命令。
 
@@ -451,18 +464,20 @@ P0 一律使用滚动窗口内的单次请求，不启用操作系统原生重�
 → 枚举 pending/delivered；先定向清理 legacy、旧、缺失、非法或 future epoch
 → 读取有效计划和来源
 → 计算滚动窗口内期望实例
-→ 按预算和预留选出期望请求
-→ 生成 current-epoch platformRequestId 与 schedule fingerprint
+→ 生成 current-epoch platformRequestId、schedule fingerprint 与 dormant Decision
+→ 按能力、预算和预留选出期望请求
 → 读取 iOS pending 或 Android adapter registry，以及同 epoch 的最新 Delivery attempt
 → 优先取消失效、失权和隐私收紧的 current-epoch 旧请求
 → 提交缺失或 fingerprint 已改变的请求
 → 环境 generation 要求重建时强制重挂全部已选请求
 → 定向取消其余不再期望的 managed 请求
-→ 写入带 epoch 的 receipt、checkpoint 与 scheduled-through 水位
-→ lease/epoch/revision/environment 已变化则停止提交、丢弃不适用水位并再次入队
+→ 逐项真实平台结果写带 epoch/fingerprint 的 receipt 与 checkpoint
+→ 重读 active generation/epoch、domain revision、settings、environment/capability、tzdb/engine/adapter guards
+→ guard 全匹配时 CAS 发布 Decision + publishedRunId；完整成功才同时发布 succeeded + scheduled-through
+→ guard 变化时不发布本轮 Decision/成功水位并耐久入队；平台失败时发布 degraded 且无当前成功水位
 ```
 
-整个对账可重复执行。平台调用不位于数据库事务内，被中断后从带 epoch 的可重放任务和短事务 checkpoint 继续，不以进程内列表作为进度，也不在正常对账调用全量取消。每个外部平台写入与 receipt commit 前后都重验 lease；epoch 变化后停止写入。尚未确认清理成功的 stale 请求继续占用预算，但永远不取得目标导航或动作权限。
+整个对账可重复执行。平台调用不位于数据库事务内，被中断后从带 epoch 的可重放任务和短事务 checkpoint 继续，不以进程内列表作为进度，也不在正常对账调用全量取消。每个外部平台写入前后都重验 lease；epoch 变化后停止写入。真实 receipt 即使随后输入变化也可以保留为非当前技术事实，但只有最终单一 guard-CAS 可以发布 `NotificationReconciliationState.state=succeeded`、`publishedRunId` 和 `scheduledThrough`；CAS 失败或提交前崩溃不得留下伪成功水位。尚未确认清理成功的 stale 请求继续占用预算，但永远不取得目标导航或动作权限。
 
 iOS pending 列表可作为当前待处理请求证据；Android 普通应用不能枚举 `AlarmManager` 的真实队列，Expo adapter registry 只证明曾登记。Android 在权限、重启、升级、时钟/时区或其他可能丢失真实闹钟的环境变化后必须强制重挂，不能因 registry 仍有条目而跳过。平台 API 返回成功只形成 `accepted`，不证明准时展示。
 
@@ -478,7 +493,7 @@ Android 只有 registry 中 platformRequestId/fingerprint/epoch 匹配，且最�
 - 来源空间或权限改变；
 - payload 或 request identity contract version 改变。
 
-隐私收紧、删除、归档或失权必须先取消旧 pending 并尽力清除 delivered，再提交适用的新请求；普通编辑以相同 request ID 替换。变得更宽松的隐私设置不要求立即重排所有既有通知；可以保持更严格内容直到下一次业务编辑或用户明确选择“更新已安排通知”。
+隐私收紧、删除、归档或失权必须先取消旧 pending 并尽力清除 delivered，再提交适用的新请求；普通编辑以相同 `platformRequestId` 替换。变得更宽松的隐私设置不要求立即重排所有既有通知；可以保持更严格内容直到下一次业务编辑或用户明确选择“更新已安排通知”。
 
 ### REM-103：调度失败重试
 
@@ -486,13 +501,13 @@ Android 只有 registry 中 platformRequestId/fingerprint/epoch 匹配，且最�
 - 权限错误：停止自动重试，等待权限变化；
 - 预算不足：保留 planned 并按优先级后续补齐；
 - 不支持触发器：降级单次调度；仍不支持则显示失败并保留应用内关注；
-- 未知错误：记录非敏感错误码和请求 ID，不能记录通知内容。
+- 未知错误：记录非敏感错误码和 `platformRequestId`，不能记录通知内容。
 
 ### REM-104：整体恢复后的通知收敛
 
 - TD-010 只在新的 Repository 可用且绑定 target epoch 的 `dataset_epoch_changed` force-reconcile task 已耐久存在后返回 `RestoreSucceeded`；不等待平台清理或重挂完成；
-- task 必须先清理 stale epoch，再重挂 current epoch；其 checkpoint、receipt、watermark 和 `NotificationReconciliationState` 全部绑定同一 epoch；
-- 清理或重挂失败显示“恢复成功，提醒正在重新检查”，状态为 `degraded_reconciliation`，幂等重试，不回滚数据集也不把恢复改报失败；
+- task 先发起并尽力确认 stale epoch 的定向清理；未确认项继续占预算，但在剩余预算内仍重挂 current epoch，不能因无法证明清理完成而永久阻塞新提醒。其 Decision、checkpoint、receipt、watermark 和 `NotificationReconciliationState` 全部绑定同一 epoch；
+- 清理或重挂失败时，恢复 API/UI postcondition 为 `RestoreSucceeded + degraded_reconciliation`，实体 `NotificationReconciliationState.state=degraded`，显示“恢复成功，提醒正在重新检查”，幂等重试，不回滚数据集也不把恢复改报失败；
 - 旧通知的安全性依赖 REM-061/062 epoch fence，而不依赖清理完成；`environmentGeneration` 不因 dataset replacement 推进。
 
 ## 12. 应用静默时段与系统勿扰
@@ -564,9 +579,9 @@ P1 远程推送用于：
 - 系统通知权限；
 - Android 精确提醒权限与近似降级；
 - Android 用户提醒渠道是否关闭；
-- 当前 control epoch 下已安排到的日期水位；
-- 当前 control epoch 下最近一次成功对账时间；epoch 不匹配、缺失或未完成时显示“正在重新检查”，不得沿用旧值；
-- 当前失败或容量不足的提醒数量，不显示敏感标题；
+- 当前 control epoch 且 `NotificationReconciliationState.state=succeeded` 时的 `scheduledThrough`；
+- 同一 succeeded 状态的最近成功对账时间；epoch 不匹配、缺失、pending/running/degraded 时显示“正在重新检查”，不得沿用旧值；
+- 当前 `publishedRunId` 的 Decision 汇总出的失败或容量不足数量；没有已发布 current-epoch run 时显示“当前未知”，不得显示成 0，也不显示敏感标题；
 - “重新检查并安排”操作；
 - 平台勿扰和厂商省电帮助入口。
 
@@ -579,7 +594,7 @@ P1 远程推送用于：
 - 已安排时的目标时间和内容隐私模式；
 - 平台限制说明入口。
 
-只有 current-epoch `NotificationReconciliationState` 和 Delivery 证据允许显示“已安排/近似安排”。整体恢复后在同 epoch 对账完成前显示“正在重新检查”，不得沿用旧状态；不能把“提醒计划已保存”写成“系统通知已安排”。
+单条“已安排/近似安排”只由同一身份 current-epoch、全部合同匹配且最新 `status=accepted` 的 Delivery 派生；否则由当前 `publishedRunId` 的 Decision 显示等待权限/等待补齐/失败。没有当前 Decision 且 ReconciliationState 缺失或为 pending/running/degraded 时显示“正在重新检查”。全局 degraded 不抹掉仍匹配的单条 accepted Delivery，但不得展示覆盖水位或最近成功；整体恢复后不得沿用旧 epoch 状态，也不能把“提醒计划已保存”写成“系统通知已安排”。
 
 ### REM-132：诊断包
 
@@ -588,7 +603,7 @@ P1 远程推送用于：
 - App/系统版本、时区数据库版本；
 - 权限和渠道状态；
 - 提醒/投递的随机 ID、时间、状态和错误码；
-- 对账水位和预算使用；
+- 对账水位、预算使用和无内容 Decision/reasonCode 汇总；
 - 厂商与设备型号。
 
 不得包含记录标题、正文、清单项目、物品名、附件、精确库存或原始智能输入。发送前展示内容并取得确认。
@@ -603,9 +618,11 @@ P1 远程推送用于：
 - 相同动作重复回调；
 - 动作到达前来源被编辑、完成、归档、删除或永久删除；
 - 同业务 ID 跨 epoch 的 platformRequestId 必须不同；old/future/missing/malformed epoch 不能入箱、导航目标或执行命令；
-- callback 在 control 切换前、validating 中和 phase=active 后到达，以及 inbox 已写但 command 未执行时 activation 取得 gate；结果只能完整旧事务、current-epoch no-op 或完整新事务；
+- 相同 epoch/request/category/action/payload 但不同 categoryContractVersion 必须得到不同 actionInboxId；旧版本只按旧 allowlist 解释；敏感 `open_only` 不能接受来源类别动作；
+- callback 在 control 切换前、validating 中和 phase=active 后到达，以及 inbox 已写但 command 未执行时 activation 取得 gate；结果只能完整旧事务、`deferred_unclassified`、stale targetless no-op、完整 current 事务或 current `business_noop`，绝不出现半事务；
+- parser Lease A 入箱后立即释放；模拟任意长锁屏等待及期间 dataset replacement，fresh Lease B 必须阻止旧目标导航/mutation，activation gate 不被用户等待占用；
 - stale pending/delivered 清理失败仍不能赋予旧 response 动作权限；
-- restore/manual rollback 后 `scheduled`/`failed`/`paused` 规范化，业务终态保留，过去目标不补发；
+- restore/manual rollback 穷举来源失效/可操作、future/past、业务终态、暂停原因成立/失效，验证 `scheduled`/`failed`/`paused` 得到 REM-012 唯一状态、适用 reason 被清理且过去目标不补发；
 - 稍后一次、多次、跨日、跨下个周期和达到上限；
 - 默认一次、重复催促停止条件和预算竞争；
 - 敏感/普通与三种通知内容模式；
@@ -624,7 +641,9 @@ P1 远程推送用于：
 - 预算以下、恰好预算、超过预算 1 和大幅超过预算；
 - 多个同一时刻提醒的稳定排序；
 - 30 天覆盖水位和滚动补齐；
-- 只有 same-epoch completed watermark 可恢复“已安排”展示；force-reconcile task 耐久但平台清理/重挂失败时保持恢复成功并进入 degraded reconciliation；
+- 只有 same-epoch `NotificationReconciliationState.state=succeeded` 且 `scheduledThrough` 非空才显示全局覆盖水位；force-reconcile task 耐久但平台清理/重挂失败时保持恢复成功并进入 degraded reconciliation；
+- 在最终 guards 读取前后和 Decision/publishedRunId/succeeded 水位 CAS 的每个写点崩溃；只有全谓词匹配的单次提交能发布成功水位，dormant/旧 epoch/非 published run Decision 永不可见；
+- 权限、channel、容量阻断在零 platform call 时仍产生逐实例 Decision；exact 拒绝但 approximate 接受时显示近似安排，不显示等待精确权限；
 - 连续 14 天真机测试包含至少一次重启、时区变化和权限切换；
 - App 30 天不打开后重新进入，验证不会补发过时洪水且能恢复未来水位；
 - 系统限制或库版本变化时先运行契约测试再升级依赖；
@@ -647,6 +666,7 @@ P1 远程推送用于：
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.6 | 2026-07-26 | 增加逐实例调度 Decision、短 parser/fresh action lease、guard-CAS 水位、确定性恢复映射、validating defer 与 P1 聚合边界。 |
 | v1.5 | 2026-07-26 | 增加 notificationDatasetEpoch payload/fence、ActionInbox 前置门、同 epoch Delivery/水位、整体恢复状态规范化与提交后 degraded reconciliation。 |
 | v1.4 | 2026-07-26 | 明确收件人范围逻辑状态与逐设备投递分离，并增加 Android registry 与同代成功回执的双重对账条件。 |
 | v1.3 | 2026-07-26 | 与 TD-009 统一一次性调度、低库存下个整分钟、快捷动作安全门、平台证据、权限撤销、总预算和强制重挂语义。 |
