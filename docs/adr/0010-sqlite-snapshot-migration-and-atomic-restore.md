@@ -62,9 +62,9 @@ DatabaseMaintenancePort (native, no UI/content logging)
 ```
 
 - Domain/feature 不能取得数据库路径、control slot、raw key、migration SQL 或任意文件 API；
-- Database Manager 只有在 control recovery、key/cipher gate、Schema/migration gate和完整性 gate 全部通过后才返回 Repository；
+- Database Manager 只有在 control recovery、key/cipher gate、Schema/migration gate 和完整性 gate 全部通过后才返回 Repository；
 - `DatabaseMaintenancePort` 接收受控 generation ID、预登记 profile 和 opaque key handle，不接收来自用户的路径、SQL、表名或 cipher 参数；
-- TD-011 只返回已认证 `VerifiedBackupHandle`、portable DB/SnapshotDataKey 句柄和已认证附件流；本 ADR 不解析备份口令或容器 framing；
+- TD-011 pass 1 首次只返回已认证 `VerifiedBackupHandle`；portable DB/附件流与 `SnapshotDataKeyHandle` 只能从该 handle 开启的一次性 second-pass import session 取得，不能作为独立可复用返回值；本 ADR 不解析备份口令或容器 framing；
 - 平台通知、文件分享、同步和遥测不在数据库事务内；切换成功后由幂等任务对账。
 
 ### 2. Generation 布局与控制记录
@@ -101,7 +101,7 @@ attachments/
 
 ```text
 formatVersion
-controlSequence                 -- exact unsigned counter
+controlSequence                 -- TD-006 LongCounter
 phase: validating | active
 activeGenerationId
 previousGenerationId?
@@ -111,13 +111,15 @@ targetDatabaseSchemaVersion
 targetCipherProfileId
 activeKeyId
 candidateRootDigest
-notificationDatasetEpoch        -- exact unsigned counter; logical dataset replacement fence
+notificationDatasetEpoch        -- TD-006 LongCounter; logical dataset replacement fence
 activatedAt?
 ```
 
-`notificationDatasetEpoch` 在初始化时为 `0`，普通 schema/cipher migration 保持不变，整体 restore 和 manual rollback 从**当前 active control** 做 checked `+1`；溢出即阻止操作。它与 candidate 在同一个 validating control slot 原子切换，并纳入 TD-009 request ID、payload 和 action 校验，因此旧数据集已展示通知即使含相同业务 ID 也只能成为 no-op。
+`controlSequence`、活动库 `dataMutationCounter`、`notificationDatasetEpoch` 全部使用 TD-006 `LongCounter` 范围 `0...9223372036854775807`，规范十进制/精确整数 adapter，绝不使用无上限 unsigned、JavaScript `number` 或 UInt64 回绕。每次递增先 checked `+1`；任一相关 counter 已到上限即阻止 capture、restore/manual rollback、migration activation 和普通写入，先走受审迁移。
 
-写 control 的唯一协议：选择 inactive slot → 写同目录随机 temp → flush 文件 → 平台写屏障 → atomic rename/move 覆盖 slot → 同步父目录 → read-back 解密并比较。Android 必须使用同文件系统 `ATOMIC_MOVE` 且验证结果；不支持时阻止切换，不能回退到 delete-then-move。Apple 使用同文件系统 `rename` 和受控 `F_BARRIERFSYNC`，发布门按目标系统决定是否还要求 `F_FULLFSYNC`。
+`notificationDatasetEpoch` 在初始化时为 `0`，普通 schema/cipher migration 保持不变，整体 restore 和 manual rollback 从**当前 active control** 做 checked `+1`。它与 candidate 在同一个 validating control slot 原子切换，并纳入 TD-009 request ID、payload 和 action 校验，因此旧数据集已展示通知即使含相同业务 ID 也只能成为 no-op。
+
+写 control 的唯一协议：从当前有效最高 `controlSequence` checked `+1`（从不复用）→ 选择 inactive slot → 写同目录随机 temp → flush 文件 → 平台写屏障 → atomic rename/move 覆盖 slot → 同步父目录 → read-back 解密并比较。Android 必须使用同文件系统 `ATOMIC_MOVE` 且验证结果；不支持时阻止切换，不能回退到 delete-then-move。Apple 使用同文件系统 `rename` 和受控 `F_BARRIERFSYNC`，发布门按目标系统决定是否还要求 `F_FULLFSYNC`。
 
 启动选择 sequence 最高且 AEAD、Schema、路径和 generation root 均合法的记录；相同 sequence 内容不同、两个 slot 都无效、引用目录不存在或 key ID 不可用时进入 integrity-blocked，不扫描目录猜“最新”、不创建空库。
 
@@ -136,7 +138,7 @@ SQLCipher Online Backup 只有目标 release 实际链接版本明确支持 encr
 
 ### 4. 一致性 capture 与附件根
 
-每次 backup、shadow migration、restore rollback checkpoint 先取得全局 `DatasetMaintenanceLease`。同一 installation 只能有一个会创建/激活 generation 的 operation；普通读取可以继续，写入在短 capture/最终切换阶段进入明确 gate。
+每次 backup、shadow migration 或 manual-rollback source capture 先取得全局 `DatasetMaintenanceLease`。restore 不另复制“回滚检查点”；切换时旧 active 在同一 gate 下封口为 previous generation。同一 installation 只能有一个会创建/激活 generation 的 operation；普通读取可以继续，写入只在短 capture/最终切换阶段进入明确 gate。
 
 ```text
 1. preflight exact free-space budget and key/cipher capabilities
@@ -152,14 +154,16 @@ SQLCipher Online Backup 只有目标 release 实际链接版本明确支持 encr
 6. run stepped sqlite3_backup_*; handle BUSY/LOCKED with bounded backoff
 7. verify destination dataMutationCounter and generation equal fixed values
 8. close/sync destination and release write gate
-9. keep attachment lease until the consuming operation finishes or is recovered
-10. run capture verification before using it
+9. run capture verification before using it
+10. retain/release sealed capture and attachment lease by the operation-specific rule
 ```
 
 - `dataMutationCounter` 在每个权威领域事务递增；纯技术 lease/checkpoint 不改变它；
 - 在同一 gate 内固定的 attachment manifest 只含 capture 中状态为 available 的权威原附件；processing、orphan、缩略图和明文 cache 不进入用户快照；
 - TD-005 文件不可变，因此释放写 gate 后可以流式读取相同 locator；GC/purge 必须尊重 lease，即使用户随后删除来源；
-- capture 失败、取消或计数不匹配时删除 destination、释放 lease并从头重试，不拼接两次结果；
+- backup 从 capture 到 TD-011 私有 `.lifebook` staging 完整复验始终持有 maintenance/snapshot/attachment lease；复验成功即全部释放，再执行可能很慢的 provider copy/commit/reopen/identity verify。用户口令确认和 provider handle 预备发生在任何 lease 之前；
+- migration/manual rollback 的 source/candidate root lease 保持到 candidate seal/activation 或 terminal cleanup；每个 lease owner、operation ID 和 terminal release 条件必须持久可恢复，不能用含糊的“consumer 完成”；
+- capture 失败、取消或计数不匹配时删除 destination、释放 lease 并从头重试，不拼接两次结果；
 - 不要求先把 WAL 普通复制/拼接。Backup API 从 SQLite handle 读取一致状态；完成后 destination 必须独立通过关闭/重开检查；
 - progress 来自 backup pages 和后续 projector rows，但页数变化只作 UI 估算，不成为完整性证据。
 
@@ -167,7 +171,7 @@ SQLCipher Online Backup 只有目标 release 实际链接版本明确支持 encr
 
 用户备份数据库成员是独立的 `portableDataSchemaVersion`，不等同活动 `databaseSchemaVersion`，也不等同 container/manifest version。构建器从空 SQLCipher 文件开始：
 
-1. 用预登记 SnapshotDataKey handle 和固定 portable cipher profile 创建目标；
+1. 请求 TD-004 Key Manager 每备份随机生成 operation-scoped `SnapshotDataKeyHandle`，用固定 portable cipher profile 创建目标；
 2. 执行签名 App 内精确 portable DDL；portable schema 不含 trigger、view、FTS/virtual table 或任意扩展；
 3. 从只读 capture 按生成的 `table.column` allowlist、稳定主键顺序和 prepared statements 分批复制；
 4. 应用明确的 portable transform：移除 Installation/Device session/key envelope/storage locator/platform delivery/诊断/搜索/缓存/缩略图，清除 `thumbnailAttachmentId`，保留 DATA-020/033 所需业务和同步安全状态；
@@ -175,11 +179,11 @@ SQLCipher Online Backup 只有目标 release 实际链接版本明确支持 encr
 6. 写 snapshot ID、source dataMutationCounter、scalar/time/rule/schema version 和分类覆盖版本；
 7. 验证行数、引用、领域不变量、成员映射与 schema fingerprint；
 8. `journal_mode=DELETE`、FULL sync、关闭并重开验证，确保没有必要 WAL/SHM；
-9. 只把已验证 portable DB 和 opaque SnapshotDataKey handle 交给 TD-011。
+9. 只把已验证 portable DB 和 operation-scoped opaque SnapshotDataKey handle 交给 TD-011 创建 session；私有容器完整复验或 terminal failure 后销毁 handle。
 
 分类采用覆盖式 allowlist：每张生产表、每个 column 和每个 JSON 字段都必须声明 `portable_required | portable_optional | device_only | derived | diagnostic | forbidden`。Schema 增加未分类项、allowlist 与迁移 checksum 不一致或 projector 未消费必需字段时，备份失败并阻止 release；不得用“删除已知敏感表”的 blocklist。
 
-portable DB 即使外层还会 AEAD 加密，本身仍使用独立 SQLCipher key，以保证私有 staging、进程重启清理和容器成员抽取不会产生明文 SQLite。SnapshotDataKey 只以 native handle 交给 TD-011 key slot 包装，不回到 JS、不复用设备 DatabaseDataKey。
+portable DB 即使外层还会 AEAD 加密，本身仍使用独立 SQLCipher key，以保证私有 staging、进程重启清理和容器成员抽取不会产生明文 SQLite。SnapshotDataKey 不是 DWK/BackupRootKey 派生值，只以 native handle 交给 TD-011 key slot 包装，不回到 JS、不复用设备 DatabaseDataKey、不跨 operation 保存。
 
 ### 6. Migration artifact 与 candidate 状态机
 
@@ -223,6 +227,7 @@ resolved_active
 - 默认保持 foreign keys 开启。若 SQLite 官方 12-step table rebuild 确需关闭，只能在 candidate 专用 connection、事务开始前关闭；完成前 `foreign_key_check` 必须零行并重新开启；
 - 禁止 `PRAGMA writable_schema`、运行不可信 SQL、修改已发布 migration 和靠 ORM 自动推断 destructive change；
 - candidate 任一错误可以删除后从 active 重建；不得把“部分迁移可打开”当成功；
+- restore candidate 从 `transforming` 进入 `verified/sealed` 还必须消费匹配的 `Pass2CompletionEvidence`；migration/manual rollback 使用各自不可伪造的 source/copy completion evidence，不能复用布尔 `isVerified`；
 - app 遇到更高 schema 时阻止写入并要求升级；不执行 down migration。
 
 ### 7. Cipher/key 迁移
@@ -241,10 +246,10 @@ resolved_active
 
 ### 8. 不可信 portable 恢复
 
-TD-011 完成 header/KDF/AEAD/manifest/成员边界认证后，portable SQLCipher 仍按不可信数据库处理。原生 reader：
+本 ADR 的恢复入口是 TD-011 已完成外部文件私有密文 staging、header/manifest/全部 payload/唯一 FINAL/EOF 首遍认证后签发的 `VerifiedBackupHandle`。外部 provider copy、`NOFOLLOW`、文件身份与 whole-container identity 由 TD-011 独占；TD-010 不再接收 URI/path 或重复复制外部文件。即使容器 pass 1 完成，portable SQLCipher 仍按不可信数据库处理。原生 reader：
 
-- 先把外部 provider 内容稳定到 App 私有加密 staging，不长期依赖外部 URI；
-- 使用 `READONLY`、`NOFOLLOW`/平台等价防 symlink，固定 canonical path；
+- 只接受 `VerifiedBackupHandle.openSecondPassImport(operationId, candidateSinkHandle)` 产生的一次性、session-scoped portable member handle，不接受任意路径；
+- portable member 只能写入受控 candidate staging，以 `READONLY` 打开；path/descriptor/file identity 由 native handle 固定，调用者不能替换；
 - 在执行任何来自该 handle 的 Schema/业务 SQL 前，通过 C API 设置 `SQLITE_DBCONFIG_DEFENSIVE=1`、`SQLITE_DBCONFIG_ENABLE_TRIGGER=0`、`SQLITE_DBCONFIG_ENABLE_VIEW=0`，并设置 `trusted_schema=OFF`、`query_only=ON`、`mmap_size=0`、`cell_size_check=ON`；任一能力缺失或设置 read-back 不符即拒绝输入；
 - 禁止 load extension 和 virtual table；以 `sqlite3_limit(..., SQLITE_LIMIT_ATTACHED, 0)` 及 authorizer 拒绝 `ATTACH/DETACH`，并收紧 length、SQL、column、expression depth、compound select、page/count 等 SQLite limits；
 - 完成上述隔离后，先验证 cipher 和 `integrity_check`，再验证 application ID、portable schema fingerprint、精确表/列/index 集合和所有版本，最后才查询业务行；
@@ -254,18 +259,23 @@ TD-011 完成 header/KDF/AEAD/manifest/成员边界认证后，portable SQLCiphe
 恢复构建流程：
 
 ```text
-verified portable reader
+VerifiedBackupHandle.openSecondPassImport(operationId, candidateSinkHandle)
+→ re-authenticate exact container; write portable DB member to disposable staging
+→ inside the session, defensive-open portable DB with session-scoped SnapshotDataKeyHandle
 → create fresh current-schema candidate with current-device DB key/profile
-→ copy and transform allowlisted fields through prepared statements
-→ merge DeviceStateOverlay field by field
-→ stream authenticated backup attachments through TD-005 re-encryption
+→ copy/transform allowlisted fields and merge DeviceStateOverlay field by field
+→ continue pass 2; stream attachment members through TD-005 re-encryption staging
+→ verify second-pass member/hash/FINAL/EOF/identity and terminal sink receipts
+→ receive Pass2CompletionEvidence bound to operation + handle + plan + candidate
 → promote new immutable locators under candidate root lease
 → write restore/sync safety gates and projection rebuild tasks
 → verify candidate and attachment roots
-→ produce non-content preview
-→ fresh auth + explicit overwrite confirmation
-→ bind expected current generation/counter and activate
+→ consume evidence once; seal candidate and produce non-content preview
+→ bind preview to expected active generation/counter + candidate evidence
+→ continue with §9 fresh auth and activation
 ```
+
+pass 2 只能写可丢弃 candidate/attachment staging；全部完成前不提升 locator、不生成 preview、不切换数据集，也不触发通知/搜索/同步。`Pass2CompletionEvidence` 是不可伪造、process-local、一次消费 capability，必须绑定 operation ID、candidate generation、`VerifiedBackupHandle` 文件身份 tuple、manifest/member-plan digest、sink completion receipt 和第二遍 whole-container identity。缺失、提前结束、绑定不匹配、重复消费或 second-pass cancel 都删除 candidate，不能进入 preview。
 
 旧 portable version 由专用只读 mapper 转成当前 candidate，不在输入文件上原地迁移。未知必需 feature/enum/field 安全失败；未知声明为可忽略的扩展仍由 TD-011 完整认证后才可丢弃。
 
@@ -276,13 +286,14 @@ verified portable reader
 候选完成验证后执行：
 
 ```text
-1. bind authorization to:
+1. require sealed CandidateEvidence derived from consumed Pass2CompletionEvidence
+   (migration/manual rollback use their typed source evidence), and a preview bound to:
      expectedActiveGenerationId + expectedDataMutationCounter
      + current/targetNotificationDatasetEpoch
-     + candidateGenerationId + candidateRootDigest
-2. fresh auth and user confirmation (restore/manual rollback)
+     + candidateGenerationId + candidateRootDigest + candidateEvidenceDigest
+2. obtain exactly one fresh auth + explicit user confirmation bound to that preview
 3. acquire exclusive DatasetGate; pause sync, reminder writes and cleanup
-4. re-read active generation/counter; mismatch => release and re-preview/re-authorize
+4. re-read active generation/counter/epoch and evidence; mismatch => release and re-preview/re-authorize
 5. persist old active attachment root as retained previous root
 6. drain and close every DB connection, statement, cursor and attachment stream
 7. seal old and candidate DB: checkpoint/truncate, DELETE journal, FULL sync, close
@@ -297,6 +308,8 @@ verified portable reader
 13. only now open Repository and accept business writes
 14. enqueue projection rebuild, notification force-reconcile, cleanup and cold-start check
 ```
+
+数据集不可静默回滚的 durable commit boundary 是步骤 11 的 `phase=active`；用户/API 的恢复成功边界更严格：只有步骤 13 candidate 再次可打开、Repository 已开放后才返回 `RestoreSucceeded`。步骤 11～13 间崩溃由启动状态机完成/阻断，不能报告成功。步骤 14 的 search/today/thumbnail/notification 等可重建投影失败属于已提交恢复后的 `degraded_reconciliation`，显示状态并幂等重试，不回滚新数据集、也不把恢复改报失败。
 
 restore/manual rollback 的 target notification epoch 必须由步骤 4 重新读取的当前 control 做 checked increment；migration 保持 epoch。通知 response 只有在其 payload epoch 等于当前 active control 且 request ID 按该 epoch 重算一致时才可进入业务 action inbox。旧 epoch 的 pending/delivered 清理是隐私和容量收敛，不是安全正确性的前提。
 
@@ -346,7 +359,8 @@ previous 不是可直接再次激活的 mutable 数据库。用户手动回滚�
 
 - 预检公式覆盖 source DB、capture、candidate/portable、最大 WAL、SQLCipher/VACUUM/export 临时空间、待重加密附件、外层容器和安全余量；所有加法/乘法使用 TD-006 exact integer 并做 overflow 检查；
 - 任何写中空间检查仍可返回 FULL；不得因预检通过就忽略中途错误；
-- migration/restore final activation 不可由普通返回手势中断；之前的 capture/project/copy 可以在 batch 边界取消，取消只清 candidate；
+- capture/project、TD-011 pass 1/pass 2、portable copy/transform、附件重加密、candidate validation 和 preview 可在安全 chunk/batch/member boundary 取消；pass 2 未正常结束不产生 evidence，candidate seal 前取消不消费 evidence，seal/preview 后取消则销毁 derived CandidateEvidence 与 candidate，均不触碰 active；
+- 一旦 §9 步骤 3 取得 exclusive DatasetGate 并进入 activation 临界段，不再接受普通返回、后台或 cancel；迟到 cancel 不能把已经提交的新数据集报告为 canceled。临界段最终只能由启动/当前进程证明为 old active、new active 或 integrity-blocked；
 - 进程终止后是否续跑由加密 operation journal、key handle 可恢复性和 profile 决定；无法安全恢复 key 的 partial 从头重建，不能把不完整文件续成成品；
 - 同一时间只有一个 dataset maintenance writer；备份可与普通读取并存，短 capture 时写 gate；restore/migration activation 排斥所有 write/sync/GC；
 - 后台时间到期时在安全 checkpoint 停止，不持有半开的 JS transaction 或 raw key；
@@ -465,7 +479,7 @@ SQLite 官方警告同文件多名、link 与 WAL/锁可能导致未定义行为
 
 - 未 checkpoint 的 WAL committed 写必须出现在 capture，未提交写不得出现；source 在每个 backup step 前后改变时结果仍为单一 counter；
 - 两平台 release SQLCipher encrypted→encrypted backup 合同；错误 key、不同 settings、缺能力都拒绝；
-- source/capture byte/key independence 按 profile验证，普通 SQLite 工具不可读取；
+- source/capture byte/key independence 按 profile 验证，普通 SQLite 工具不可读取；
 - `sqlcipher_export` 的 old→new key/settings/major fixture，显式 user_version/auto_vacuum/schema meta 验证；
 - source/capture/candidate 截断、bit flip、WAL/SHM 不配对和 IOERR/FULL/BUSY/LOCKED；
 - capture/project 任一 kill 后 active 字节和可见数据不变，orphan 可回收。
@@ -490,12 +504,16 @@ SQLite 官方警告同文件多名、link 与 WAL/锁可能导致未定义行为
 
 ### 4. 恢复与恶意输入
 
+- TD-011 pass 1 未验证全部 member/FINAL/EOF 时无法构造 `VerifiedBackupHandle`；两遍间关闭/替换/修改 staging 会使 handle terminal；
+- pass 2 未正常结束、sink receipt 缺失、operation/candidate/handle/plan/whole-container identity 不匹配或 evidence 重复消费时，无法 seal/preview/activate；
 - portable schema 多/少表列、duplicate/错误类型、trigger/view/virtual table、超长值、深 JSON、巨大 page/count、恶意 record ID 和引用环；
 - `trusted_schema=OFF`、DEFENSIVE、`ENABLE_TRIGGER=0`、`ENABLE_VIEW=0`、`SQLITE_LIMIT_ATTACHED=0`、authorizer、NOFOLLOW、extension disabled 和其余 SQLite limits 在 release 二进制实测；
 - Installation、keys、app lock、permission、session、BYOK、telemetry consent 不被备份覆盖；portable 偏好按字段恢复；
 - 10,000 附件/5 GiB root、缺失/损坏附件、restore re-encryption 任一点 kill、locator collision 和 GC lease；
 - preview 后当前 generation/counter 改变会要求重新确认，不能覆盖未预览变化；
+- preview cancel 清理 candidate；activation gate 前/后注入 late cancel，证明最终返回与 old/new/integrity-blocked 实际状态一致，绝不把已提交 new active 报为 canceled；
 - switch 前所有失败当前 active 不变；validating 自检失败回旧；marker 后失败阻断/完成而不静默回旧；
+- `phase=active` 后 Repository reopen 失败不得返回 `RestoreSucceeded`；Repository 已开放后 projection/notification rebuild 失败返回成功 + degraded reconciliation，并保持新 active；
 - 恢复/手动回滚 activation 前后构造旧 epoch delivered response，证明同业务 ID 也永久 no-op；migration 保持 epoch 且现有请求可按 fingerprint 收敛；
 - 恢复后 search/today/thumbnail 重建、TD-009 通知定向清理和强制重挂、过去提醒不补发、sync provenance/generation gate。
 
@@ -538,6 +556,7 @@ previous generation 默认按 DATA-044 保留并允许用户提前清理。清�
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-26 | 对齐 TD-011 两遍恢复，以一次性 Pass2CompletionEvidence 封口 candidate；统一 TD-006 LongCounter、备份 lease 释放、单次 fresh auth、Repository-open 成功点和 late-cancel 终态。 |
 | 2026-07-26 | 采用 TD-005 CiphertextIdentity，并明确 sealed generation 只保留权威原附件、派生缩略图清引用后重建。 |
 | 2026-07-26 | 明确 active 动态附件 root 同时覆盖权威原附件和仍被引用的派生缩略图。 |
 | 2026-07-26 | 区分 active 动态附件 root 与 sealed manifest；增加通知数据集 epoch；显式禁用不可信 SQLite trigger/view/ATTACH；统一回滚检查点自动删除资格。 |
