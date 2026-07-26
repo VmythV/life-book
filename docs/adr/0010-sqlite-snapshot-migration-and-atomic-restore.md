@@ -93,7 +93,7 @@ attachments/
 - SQLite 文件没有 hard link/symlink/别名，始终以唯一 canonical path 打开；同一 generation 的 `-wal/-shm` 只与该文件同目录存在；
 - attachment locator 全局随机且正文不可变；哪个附件可见只由当前数据库引用决定；
 - `generation-root.enc` 是 **sealed generation** 的设备认证加密 locator/root manifest，至少绑定 generation ID、数据库 schema/cipher/key ID、附件 locator + expected ciphertext identity 的排序摘要、createdAt 和保留原因；candidate/capture 封口时生成，active 即将变为 previous 时从同一写 gate 下的当前数据库重新冻结；它不进入用户备份；
-- active generation 的 GC root 是当前数据库中 `available` 权威原附件的动态集合，不使用 activation 时冻结的 `generation-root.enc` 判定当前集合；previous rollback、sealed candidate/capture 使用冻结 manifest，backup/upload/restore 使用 operation lease。孤儿清理必须合并所有这些 root；
+- active generation 的 GC root 是当前数据库中所有仍需保留字节的 locator-bearing `Attachment` 行动态集合，包含权威原附件和仍被引用的派生缩略图；不使用 activation 时冻结的 `generation-root.enc` 判定当前集合。previous rollback、sealed candidate/capture 使用冻结 manifest，backup/upload/restore 使用 operation lease；孤儿清理必须合并所有这些 root；
 - `candidateRootDigest` 只认证 activation 时的 candidate 初始附件集合和 sealed root，active 开放写入后不再代表其当前附件集合，也不得据此保留或删除 active 附件；
 - staging/quarantine 只允许受控单项路径 API；用户输入不能成为文件名或相对路径。
 
@@ -538,5 +538,6 @@ previous generation 默认按 DATA-044 保留并允许用户提前清理。清�
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-26 | 明确 active 动态附件 root 同时覆盖权威原附件和仍被引用的派生缩略图。 |
 | 2026-07-26 | 区分 active 动态附件 root 与 sealed manifest；增加通知数据集 epoch；显式禁用不可信 SQLite trigger/view/ATTACH；统一回滚检查点自动删除资格。 |
 | 2026-07-26 | 接受 SQLCipher capture/export/portable 三路径、candidate-only migration、双槽 generation control、activation marker、不可信 portable reader 和多 root 附件协议。 |
