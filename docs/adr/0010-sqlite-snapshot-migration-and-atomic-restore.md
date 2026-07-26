@@ -174,7 +174,7 @@ SQLCipher Online Backup 只有目标 release 实际链接版本明确支持 encr
 1. 请求 TD-004 Key Manager 每备份随机生成 operation-scoped `SnapshotDataKeyHandle`，用固定 portable cipher profile 创建目标；
 2. 执行签名 App 内精确 portable DDL；portable schema 不含 trigger、view、FTS/virtual table 或任意扩展；
 3. 从只读 capture 按生成的 `table.column` allowlist、稳定主键顺序和 prepared statements 分批复制；
-4. 应用明确的 portable transform：移除 Installation/Device session/key envelope/storage locator/platform delivery/诊断/搜索/缓存/缩略图，清除 `thumbnailAttachmentId`，保留 DATA-020/033 所需业务和同步安全状态；
+4. 应用明确的 portable transform：移除 Installation/Device session/key envelope/storage locator/`NotificationDelivery`/`NotificationActionInbox`/通知 reconcile task、checkpoint、watermark/诊断/搜索/缓存/缩略图，清除 `thumbnailAttachmentId`，保留 DATA-020/033 所需业务和同步安全状态；
 5. 将每个原附件逻辑 ID 映射为 TD-011 member ID，不保存设备 FileDataKey、ARK envelope、路径或 locator；
 6. 写 snapshot ID、source dataMutationCounter、scalar/time/rule/schema version 和分类覆盖版本；
 7. 验证行数、引用、领域不变量、成员映射与 schema fingerprint；
@@ -279,7 +279,9 @@ pass 2 只能写可丢弃 candidate/attachment staging；全部完成前不提�
 
 旧 portable version 由专用只读 mapper 转成当前 candidate，不在输入文件上原地迁移。未知必需 feature/enum/field 安全失败；未知声明为可忽略的扩展仍由 TD-011 完整认证后才可丢弃。
 
-`DeviceStateOverlay` 逐字段拥有恢复策略：保留当前 Installation、数据库/附件/control keys、应用锁能力、系统权限、通知 channel/平台 ID、账号 session/token、BYOK、遥测/法律同意的当前设备要求；只恢复明确分类为 portable 的用户内容偏好。物理 Schema 必须拆分或声明每列 policy，不能对混合 AppPreferences 做整行覆盖。
+`DeviceStateOverlay` 逐字段拥有恢复策略：保留当前 Installation、数据库/附件/control keys、应用锁能力、系统权限、通知 capability/channel 配置（不含 request/delivery platform ID）、账号 session/token、BYOK、遥测/法律同意的当前设备要求；只恢复明确分类为 portable 的用户内容偏好。物理 Schema 必须拆分或声明每列 policy，不能对混合 AppPreferences 做整行覆盖。
+
+整体 restore/manual rollback 不导入任何源 generation 的 `NotificationDelivery`、`NotificationActionInbox`、平台 ID、reconcile task/checkpoint/watermark。portable mapper 对依赖设备投递证据的 `ReminderInstance` 做 TD-009/REM 规范化：来源有效且未来的 `scheduled`/`failed` 变为 `planned`；过去目标按 REM-032 处理且不补发；`acknowledged`/`snoozed`/`cancelled`/`expired` 终态保留；`paused` 只有暂停原因仍成立才保留，否则按未来/过去重新判断。schema/cipher migration 保持 epoch、同 epoch 合法 delivery 和实例状态，不执行此恢复规范化。
 
 ### 9. 原子 activation 协议
 
@@ -292,7 +294,9 @@ pass 2 只能写可丢弃 candidate/attachment staging；全部完成前不提�
      + current/targetNotificationDatasetEpoch
      + candidateGenerationId + candidateRootDigest + candidateEvidenceDigest
 2. obtain exactly one fresh auth + explicit user confirmation bound to that preview
-3. acquire exclusive DatasetGate; pause sync, reminder writes and cleanup
+3. acquire exclusive DatasetGate; pause sync, reminder writes and cleanup;
+   wait for or revoke every reminder reconcile/action DatasetReadLease,
+   and stop issuing new notification leases
 4. re-read active generation/counter/epoch and evidence; mismatch => release and re-preview/re-authorize
 5. persist old active attachment root as retained previous root
 6. drain and close every DB connection, statement, cursor and attachment stream
@@ -302,21 +306,25 @@ pass 2 只能写可丢弃 candidate/attachment staging；全部完成前不提�
      notificationDatasetEpoch=target epoch
 9. reopen only candidate; run first-open self-test
 10. in candidate DELETE/FULL transaction write durable activation marker
-    binding operationId, generationId and candidateRootDigest; close/read back
+    binding operationId, generationId and candidateRootDigest; for restore/manual rollback,
+    atomically activate dormant notification force-reconcile task bound to target epoch
+    and reason=dataset_epoch_changed, and invalidate bare/old-epoch scheduled-through;
+    migration only activates an ordinary task when scheduling data/contract changed; close/read back
 11. write control sequence N+2 with phase=active and activatedAt
 12. reopen candidate under normal WAL/FULL policy
 13. only now open Repository and accept business writes
-14. enqueue projection rebuild, notification force-reconcile, cleanup and cold-start check
+14. wake durable projection/notification processors; enqueue cleanup and cold-start check
 ```
 
-数据集不可静默回滚的 durable commit boundary 是步骤 11 的 `phase=active`；用户/API 的恢复成功边界更严格：只有步骤 13 candidate 再次可打开、Repository 已开放后才返回 `RestoreSucceeded`。步骤 11～13 间崩溃由启动状态机完成/阻断，不能报告成功。步骤 14 的 search/today/thumbnail/notification 等可重建投影失败属于已提交恢复后的 `degraded_reconciliation`，显示状态并幂等重试，不回滚新数据集、也不把恢复改报失败。
+数据集不可静默回滚的 durable commit boundary 是步骤 11 的 `phase=active`；用户/API 的恢复成功边界更严格：只有步骤 13 candidate 再次可打开、Repository 已开放，且对 restore/manual rollback 而言步骤 10 的 target-epoch force-reconcile task 仍可耐久读取后，才返回 `RestoreSucceeded`。步骤 11～13 间崩溃由启动状态机完成/阻断，不能报告成功。步骤 14 的 search/today/thumbnail/notification 等可重建投影失败属于已提交恢复后的 `degraded_reconciliation`，显示状态并幂等重试，不回滚新数据集、也不把恢复改报失败。
 
-restore/manual rollback 的 target notification epoch 必须由步骤 4 重新读取的当前 control 做 checked increment；migration 保持 epoch。通知 response 只有在其 payload epoch 等于当前 active control 且 request ID 按该 epoch 重算一致时才可进入业务 action inbox。旧 epoch 的 pending/delivered 清理是隐私和容量收敛，不是安全正确性的前提。
+restore/manual rollback 的 target notification epoch 必须由步骤 4 重新读取的当前 control 做 checked increment；migration 保持 epoch。只有提交的 replacement 才产生一次有效 epoch 增长：`validating` 无 marker 回 previous 时，新 control 记录恢复 previous 的原 epoch；有 marker 时完成同一个 target epoch，不再次递增。通知 response 只有在其 payload epoch 等于当前 `phase=active` control、Repository 已开放且 request ID 按该 epoch 重算一致时才可进入业务 action inbox。旧 epoch 的 pending/delivered 清理是隐私和容量收敛，不是安全正确性的前提。
 
 任何 SQLite 文件只在所有 handle 已关闭后变更 journal/清理 auxiliary file；不重命名活动数据库。activation marker 是防静默回滚边界：
 
-- `phase=validating` 且 candidate 无 marker：startup 自检失败可写更高 sequence 回到 previous；
-- `phase=validating` 且 candidate 有匹配 marker：完成 `phase=active`，不能回滚；
+- `phase=validating` 期间 notification subsystem 保持关闭，不能签发 reconcile/response/action lease；
+- `phase=validating` 且 candidate 无 marker：startup 自检失败可写更高 sequence 回到 previous，并恢复 previous 的原 notification epoch；
+- `phase=validating` 且 candidate 有匹配 marker：以 marker 已绑定的 target epoch 完成 `phase=active`，不能回滚或再次递增；
 - `phase=active` 后即使 control 最新 slot 或数据库随后损坏，也不得自动启用 previous，因为 candidate 可能已经接受新写入；进入 integrity-blocked；
 - 两个 control slot 都失效/冲突时不得按目录 mtime、文件名或 user_version 猜测；保留所有 generation 等待受控恢复。
 
@@ -349,7 +357,7 @@ previous 不是可直接再次激活的 mutable 数据库。用户手动回滚�
 7. 五种 Record/detail 一一对应、Occurrence、Checklist、库存账本、回收站、同步 generation、提醒等领域不变量通过；
 8. attachment ID/member/locator、状态、大小和 hash/root 全部一致；
 9. 未知 enum、版本和必需 feature 安全失败；
-10. 可重建 search/today/thumbnail/platform delivery 不被误当权威或 portable 成员；
+10. 可重建 search/today/thumbnail/platform delivery 不被误当权威或 portable 成员；restore/manual rollback candidate 不含旧 NotificationDelivery/ActionInbox/reconcile checkpoint/watermark，也不存在仍依赖旧设备证据的 `scheduled`/`failed` 状态；
 11. 关闭、同步、重新打开，再运行 quick/full profile 必需检查；
 12. seal 后没有 hot/未处理 WAL、SHM 或 journal。
 
@@ -368,17 +376,17 @@ previous 不是可直接再次激活的 mutable 数据库。用户手动回滚�
 
 ### 13. 切换后的收敛
 
-activation transaction/candidate 预先写入幂等 rebuild tasks。Repository 开放后按依赖执行：
+candidate 预先写入 dormant 幂等 rebuild tasks；对 restore/manual rollback，§9 步骤 10 在 marker transaction 中耐久激活 target-epoch notification task，步骤 14 只唤醒 processor。Repository 开放后按依赖执行：
 
 1. 校验当前 DeviceStateOverlay 和 sync restore gate；
 2. 重建 Search A/B index、今天/统计 projection；
 3. 重建缺失缩略图；
-4. TD-009 推进 environment generation，定向清理旧 notification managed IDs 并从未来计划强制重挂，不补发过去提醒；
+4. 以 TD-009 `dataset_epoch_changed` 原因运行已激活的同 epoch 强制对账：先定向清理旧/非法 epoch managed IDs，再从未来计划重挂；不补发过去提醒，也不因 dataset replacement 推进 environment generation；
 5. 恢复允许的 sync，先验证 Account/Space/membership/snapshotGeneration；
 6. 完成一次冷启动自检后记录 rollback retention evidence；
 7. GC 只清无 root 的 candidate/capture/attachment orphan。
 
-projection 失败不自动回滚已验证业务数据；显示局部重建状态并重试。若业务权威自检失败且尚未写 activation marker，可自动回旧 generation；marker/active 后按完整性保护处理，避免丢新写入。
+projection 失败不自动回滚已验证业务数据；显示局部重建状态并重试。notification task 已耐久但平台清理/重挂失败时继续返回 `RestoreSucceeded + degraded_reconciliation`，旧 response 的安全性由 epoch fence 保证。若业务权威自检失败且尚未写 activation marker，可自动回旧 generation；marker/active 后按完整性保护处理，避免丢新写入。
 
 ## Alternatives considered
 
@@ -498,6 +506,8 @@ SQLite 官方警告同文件多名、link 与 WAL/锁可能导致未定义行为
 - control temp write、file sync、barrier、atomic move、parent sync、read-back 每点 kill/IO error；
 - 最新 slot 截断/tag 错而另一 slot valid；相同 sequence 冲突；两个 slot 坏；未知 generation/path traversal/symlink；
 - validating 前 crash、pointer 后 marker 前 crash、marker 后 active control 前 crash、active control 后 Repository 前 crash；
+- validating 无 marker 回 previous 时 epoch 保持原值；marker 后完成 target 只递增一次；migration 始终零次递增；
+- validating 阶段 reminder reconcile/response/action 无法取得 lease；activation gate 等待事务内 action 完整提交或回滚；
 - active 后完成一笔新业务写，再破坏最新 slot/DB，证明不会自动回 previous；
 - Android 目标文件系统实际支持/验证 `ATOMIC_MOVE`，Apple barrier/full sync 行为真机掉电/强杀测试；
 - 切换时仍有 statement/cursor/connection/attachment stream 必须被 gate 阻止，不强行 rename open file。
@@ -509,12 +519,14 @@ SQLite 官方警告同文件多名、link 与 WAL/锁可能导致未定义行为
 - portable schema 多/少表列、duplicate/错误类型、trigger/view/virtual table、超长值、深 JSON、巨大 page/count、恶意 record ID 和引用环；
 - `trusted_schema=OFF`、DEFENSIVE、`ENABLE_TRIGGER=0`、`ENABLE_VIEW=0`、`SQLITE_LIMIT_ATTACHED=0`、authorizer、NOFOLLOW、extension disabled 和其余 SQLite limits 在 release 二进制实测；
 - Installation、keys、app lock、permission、session、BYOK、telemetry consent 不被备份覆盖；portable 偏好按字段恢复；
+- restore candidate 排除 Delivery/ActionInbox/reconcile task/checkpoint/watermark；`scheduled`/`failed`/`paused` 按 TD-009/REM 规范化，过去目标不补发；
 - 10,000 附件/5 GiB root、缺失/损坏附件、restore re-encryption 任一点 kill、locator collision 和 GC lease；
 - preview 后当前 generation/counter 改变会要求重新确认，不能覆盖未预览变化；
 - preview cancel 清理 candidate；activation gate 前/后注入 late cancel，证明最终返回与 old/new/integrity-blocked 实际状态一致，绝不把已提交 new active 报为 canceled；
 - switch 前所有失败当前 active 不变；validating 自检失败回旧；marker 后失败阻断/完成而不静默回旧；
 - `phase=active` 后 Repository reopen 失败不得返回 `RestoreSucceeded`；Repository 已开放后 projection/notification rebuild 失败返回成功 + degraded reconciliation，并保持新 active；
-- 恢复/手动回滚 activation 前后构造旧 epoch delivered response，证明同业务 ID 也永久 no-op；migration 保持 epoch 且现有请求可按 fingerprint 收敛；
+- 恢复/手动回滚 activation 前后构造旧 epoch delivered response，证明同业务 ID 且 stale cleanup 尚未成功时也永久 no-op；migration 保持 epoch 且现有请求可按 fingerprint 收敛；
+- target-epoch force-reconcile task 在 marker transaction 后耐久；步骤 13 后立即 kill 仍能由冷启动发现；平台清理/重挂失败返回成功 + degraded reconciliation；
 - 恢复后 search/today/thumbnail 重建、TD-009 通知定向清理和强制重挂、过去提醒不补发、sync provenance/generation gate。
 
 ### 5. 安全和产物
@@ -556,6 +568,7 @@ previous generation 默认按 DATA-044 保留并允许用户提前清理。清�
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-26 | 固定通知 lease/epoch 激活边界、validating 回旧语义、marker 事务中的同 epoch force-reconcile，以及 portable 提醒状态规范化。 |
 | 2026-07-26 | 对齐 TD-011 两遍恢复，以一次性 Pass2CompletionEvidence 封口 candidate；统一 TD-006 LongCounter、备份 lease 释放、单次 fresh auth、Repository-open 成功点和 late-cancel 终态。 |
 | 2026-07-26 | 采用 TD-005 CiphertextIdentity，并明确 sealed generation 只保留权威原附件、派生缩略图清引用后重建。 |
 | 2026-07-26 | 明确 active 动态附件 root 同时覆盖权威原附件和仍被引用的派生缩略图。 |
