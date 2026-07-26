@@ -1,6 +1,6 @@
 # 生活有谱提醒与系统通知规范
 
-> 项目代号：`life-book` · 版本：v1.1 · 更新日期：2026-07-26 · 状态：提醒基线
+> 项目代号：`life-book` · 版本：v1.2 · 更新日期：2026-07-26 · 状态：提醒基线
 >
 > 权威范围：提醒计划、提醒实例、系统调度、通知动作、去重、权限、降级和可靠性边界
 >
@@ -70,11 +70,14 @@ P0 不允许一个计划同时含多个触发；多个提前提醒创建多个�
 
 ```text
 planned ──提交成功──→ scheduled ──用户动作──→ acknowledged
-   │                       │          └──稍后──→ snoozed → 新 planned 实例
+   │                       ├──稍后──→ snoozed → 新 planned 实例
    │                       ├──来源失效──→ cancelled
    │                       ├──不再可操作──→ expired
    │                       └──对账失败──→ failed → 可重试 planned
-   └──来源失效────────────→ cancelled
+   ├──来源失效────────────→ cancelled
+   └────────┐
+scheduled ──┴──空间/订阅暂停──→ paused ──恢复且仍在未来──→ planned
+                                      └──已到时────────→ expired
 ```
 
 规则：
@@ -84,6 +87,7 @@ planned ──提交成功──→ scheduled ──用户动作──→ acknow
 - 用户从通知中心清除通知通常不可可靠观测，不得据此完成或确认业务；
 - acknowledged、snoozed、cancelled 和 expired 是终态；重试创建新的投递尝试，不改变逻辑实例 ID；
 - failed 在问题解决且来源仍有效时可以回到 planned。
+- planned/scheduled 可以在空间待删除或 subscription 临时暂停时进入 paused；暂停会取消平台请求但保留实例 ID 和 deduplicationKey。恢复时 scheduledFor 仍在未来则回 planned，已到时则转 expired，禁止补发。
 
 ### REM-013：通知投递状态
 
@@ -127,6 +131,8 @@ planned ──提交成功──→ scheduled ──用户动作──→ acknow
 
 所有取消先提交领域事务中的任务，再调用平台取消；平台取消失败进入对账，不恢复已经完成的业务对象。
 
+家庭空间进入 `deletion_scheduled` 不是来源永久失效：ReminderSubscription 与适用实例进入 paused；空间进入 deleting/deleted、成员离开或计划永久删除才 cancelled。取消家庭删除只恢复未来实例，暂停期间已经过去的时刻转 expired。
+
 ## 4. 提醒时间生成
 
 ### REM-030：从计划到实例
@@ -155,6 +161,8 @@ reminderPlanId
 
 标题、正文和当前时区解析出的 Instant 不进入身份键；编辑时间后保持逻辑实例身份并替换平台调度，避免旧通知残留。
 
+paused→active 必须保留原 ReminderInstance ID 和 deduplicationKey；恢复过程只重算是否仍在未来，不增加 follow-up generation，也不创建“补发”实例。
+
 ### REM-032：过去提醒
 
 - 创建或编辑时计算结果已经过去：显示“提醒时间已过”，不立即补发；用户可改为现在、稍后或关闭。
@@ -173,7 +181,7 @@ reminderPlanId
 
 ### REM-040：默认一次
 
-每个提醒实例默认只向系统提交一次。用户没有动作时，业务对象继续按“今天”规则展示，但不自动再发系统通知。
+每个收件人范围内的提醒实例默认只向系统提交一次。用户没有动作时，业务对象继续按“今天”规则展示，但不自动再发系统通知；家庭成员之间各有独立 subscription，不共享“是否知道了”。
 
 ### REM-041：重复催促策略
 
@@ -190,9 +198,10 @@ P0 只有用户明确开启后才创建 `FollowUpPolicy`：
 
 ### REM-042：停止重复催促
 
-以下任一发生时取消所有未触发后续实例：
+以下任一发生时，在该动作适用的收件人范围内取消未触发后续实例：
 
-- 用户完成、跳过、知道了、加入采购清单或执行适用确认；
+- 当前收件人知道了或执行稍后之外的个人确认时，只停止该 subscription 的链；
+- 完成/跳过共享周期、完成共享清单、加入共享采购清单、库存恢复或其他来源级处理时，停止所有适用 subscription 的链；
 - 用户稍后提醒，原链停止，由 snooze 实例重新开始但不自动继承剩余催促，确认页可选择；
 - 来源归档、删除、完成、日期失效或低库存解决；
 - 达到 maxFollowUps 或 stopAfter；
@@ -231,7 +240,7 @@ P0 只有用户明确开启后才创建 `FollowUpPolicy`：
 | `checklist.v1` | 打开、稍后 | OpenChecklist / SnoozeReminder |
 | `memo.v1` | 知道了、稍后、打开 | AcknowledgeReminder(noted) / SnoozeReminder |
 | `important_date.v1` | 知道了、稍后、打开 | AcknowledgeReminder(noted) / SnoozeReminder |
-| `low_stock.v1` | 加入采购清单、知道了、打开 | AddItemToShoppingChecklist / AcknowledgeEpisode |
+| `low_stock.v1` | 加入采购清单、知道了、打开 | AddItemToShoppingChecklist / AcknowledgeReminder(noted) |
 
 类别版本改变动作语义时必须增加版本，不修改已调度通知对旧 ID 的解释。
 
@@ -405,6 +414,8 @@ P0 采用保守预算，不依赖平台在超量时选择保留哪条：
 - App 版本升级后；
 - Android 设备开机和系统允许的相关广播后；
 - P1 同步应用远程变化后。
+- Space 进入或取消 deletion_scheduled，ReminderSubscription 的 mode/status/membership tenure 改变后；
+- SpaceTransferOperation committed 后，在来源设备取消旧空间投递并在仍有目标权限的设备按目标空间重建。
 
 ### REM-101：对账算法
 
@@ -490,9 +501,16 @@ P1 远程推送用于：
 - P1 个人空间为账号 owner 建立默认 ReminderSubscription；同一账号多个 Device 共享一个收件人范围内的 ReminderInstance，各自拥有 NotificationDelivery；
 - P2 家庭 ReminderPlan 属于共享业务记录，每个主动订阅成员拥有独立 subscription 和收件人范围内的 ReminderInstance；
 - 创建计划的成员默认订阅，其他成员不因加入家庭自动订阅全部提醒；具体权限和退出规则见 FAMILY-090～FAMILY-092；
-- 知道了、打开和稍后只改变当前收件人的提醒实例；完成/跳过周期、完成清单、解决低库存等共享业务动作按来源规则取消所有成员适用的未来实例；
+- 知道了、打开和稍后只改变当前 membership/subscription 的提醒实例；完成/跳过共享周期、完成共享清单、加入共享采购清单、库存恢复等共享业务动作按来源规则对账所有成员适用的未来实例；
 - 一个成员退订不关闭 ReminderPlan 或其他成员订阅；计划关闭、记录归档/删除、来源失效时取消全部订阅实例；
 - deduplicationKey 必须包含 subscription 身份或等价收件人槽位，同一账号的多个 Device 不能因此生成不同逻辑实例。
+
+### REM-124：家庭空间暂停
+
+- 家庭进入 deletion_scheduled 时，服务端停止该空间新远程投递，将 active subscription/instance 置 paused；已同步设备取消相应平台调度。
+- 离线设备收到空间状态前仍可能展示已安排通知，产品必须说明“联网后停止”，不能承诺远程绝对撤回已经交给系统的通知。
+- owner 取消删除时只把原 mode!=off 的 subscription 恢复 active；未来实例回 planned，暂停期间已到时实例转 expired，不补发、不恢复旧平台 ID。
+- 家庭到期 deleting/deleted、成员退出或被移除时 subscription 进入终态 cancelled；同账号重新加入会基于新 membership 建立新 subscription，不能恢复旧链。
 
 ## 14. 可观察状态与用户诊断
 
@@ -544,6 +562,7 @@ P1 远程推送用于：
 - 稍后一次、多次、跨日、跨下个周期和达到上限；
 - 默认一次、重复催促停止条件和预算竞争；
 - 敏感/普通与三种通知内容模式。
+- 三成员分别知道了低库存、加入共享采购清单、mode=off、paused/cancelled，以及一个成员动作不影响其他成员个人确认状态。
 
 ### REM-141：平台与权限
 
@@ -560,6 +579,7 @@ P1 远程推送用于：
 - 连续 14 天真机测试包含至少一次重启、时区变化和权限切换；
 - App 30 天不打开后重新进入，验证不会补发过时洪水且能恢复未来水位；
 - 系统限制或库版本变化时先运行契约测试再升级依赖。
+- 家庭待删除期间设备离线、恢复联网、取消删除和到期删除，验证暂停期间不生成新投递、恢复只安排未来时刻、重新加入不复活旧 subscription。
 
 ## 16. 官方平台依据
 
@@ -578,5 +598,6 @@ P1 远程推送用于：
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.2 | 2026-07-26 | 增加可恢复提醒暂停，统一家庭 membership 订阅、个人低库存确认和空间待删除对账。 |
 | v1.1 | 2026-07-26 | 增加账号多设备与家庭成员订阅的收件人范围，区分个人提醒动作和共享业务动作。 |
 | v1.0 | 2026-07-26 | 建立提醒四层模型、状态机、来源动作、重复催促、稍后提醒、隐私、权限、平台调度预算、对账、远程扩展和测试边界。 |
