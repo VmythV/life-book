@@ -5,7 +5,7 @@
 > Decision owners：客户端架构负责人、服务端架构负责人、数据负责人  
 > Scope：P0～P2 领域对象、SQLite、JSON/HTTP、备份、同步和服务端之间的基础标量  
 > Related requirements：领域模型 §2、REC-001～003、REC-020～023、BR-082、SYNC-032、SYNC-034、QR-022、QR-090～091、QR-110  
-> Related ADRs：[TD-002](0002-offline-first-client-architecture.md)、[TD-003](0003-encrypted-local-database.md)、[TD-007](0007-time-zone-and-recurrence-engine.md)、[TD-010](0010-snapshot-schema-and-migrations.md)、[TD-014](0014-api-style-and-contract-versioning.md)  
+> Related ADRs：[TD-002](0002-offline-first-client-architecture.md)、[TD-003](0003-encrypted-local-database.md)、[TD-007](0007-time-recurrence-engine.md)、[TD-010](0010-snapshot-schema-and-migrations.md)、[TD-014](0014-api-style-and-contract-versioning.md)  
 > Decision gate：跨 TypeScript、SQLite、备份和服务端的兼容 fixture 全部通过后，才允许冻结首个持久化 schema
 
 ## Context
