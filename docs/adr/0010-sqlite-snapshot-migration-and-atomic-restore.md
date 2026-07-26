@@ -92,9 +92,9 @@ attachments/
 - generation ID 是新的 TD-006 EntityId，只用于本机数据集版本，不含账号、空间、时间或内容；
 - SQLite 文件没有 hard link/symlink/别名，始终以唯一 canonical path 打开；同一 generation 的 `-wal/-shm` 只与该文件同目录存在；
 - attachment locator 全局随机且正文不可变；哪个附件可见只由当前数据库引用决定；
-- `generation-root.enc` 是 **sealed generation** 的设备认证加密 locator/root manifest，至少绑定 generation ID、数据库 schema/cipher/key ID、附件 locator + expected ciphertext identity 的排序摘要、createdAt 和保留原因；candidate/capture 封口时生成，active 即将变为 previous 时从同一写 gate 下的当前数据库重新冻结；它不进入用户备份；
+- `generation-root.enc` 是 **sealed generation** 的设备认证加密 locator/root manifest，至少绑定 generation ID、数据库 schema/cipher/key ID、权威原附件 locator + TD-005 `CiphertextIdentity` 的排序摘要、createdAt 和保留原因；candidate/capture 封口时生成，active 即将变为 previous 时从同一写 gate 下的当前数据库重新冻结；派生缩略图不作为 sealed generation 必需 root，封口时清空其引用并写重建任务；该 manifest 不进入用户备份；
 - active generation 的 GC root 是当前数据库中所有仍需保留字节的 locator-bearing `Attachment` 行动态集合，包含权威原附件和仍被引用的派生缩略图；不使用 activation 时冻结的 `generation-root.enc` 判定当前集合。previous rollback、sealed candidate/capture 使用冻结 manifest，backup/upload/restore 使用 operation lease；孤儿清理必须合并所有这些 root；
-- `candidateRootDigest` 只认证 activation 时的 candidate 初始附件集合和 sealed root，active 开放写入后不再代表其当前附件集合，也不得据此保留或删除 active 附件；
+- `candidateRootDigest` 只认证 activation 时 candidate 的初始权威原附件集合和 sealed root，active 开放写入后不再代表其当前附件集合，也不得据此保留或删除 active 附件；
 - staging/quarantine 只允许受控单项路径 API；用户输入不能成为文件名或相对路径。
 
 `DatasetControlRecord` 使用由 TD-004 Key Manager 生成、DWK 包装的独立 256-bit `DatasetControlKey` 认证加密。两个 slot 交替写，明文逻辑结构为：
@@ -434,7 +434,7 @@ SQLite 官方警告同文件多名、link 与 WAL/锁可能导致未定义行为
 | 新字段泄露到用户备份 | 覆盖式 table/column/JSON 分类；未知项阻止构建和备份。 |
 | control slot torn/corrupt | AEAD 双槽、sequence、屏障、read-back；两个都无效时阻断不猜。 |
 | 自动回旧 generation 丢新写入 | activation marker 后只能完成 active；Repository 在 active control 后才开放。 |
-| GC 删除备份/回滚所需附件 | active DB 动态 root + sealed previous/candidate/capture manifest + backup/upload/restore lease；expected identity 和安全年龄。 |
+| GC 删除备份/回滚所需附件 | active DB 动态 root + sealed previous/candidate/capture 权威原附件 manifest + backup/upload/restore lease；TD-005 `CiphertextIdentity`、重新求根和安全年龄。 |
 | 恶意 SQLite 利用 Schema/parser | readonly NOFOLLOW、defensive/trusted_schema off、C API 禁 trigger/view/ATTACH、严格 limits/schema fingerprint、逐字段复制。 |
 | 迁移中磁盘满 | exact 预检 + 写中处理；candidate 可删、active 不变；不自动删权威数据。 |
 | 大迁移无限/重复 | keyset progress 与 batch 同事务；checksum/phase；从 candidate 重启安全。 |
@@ -538,6 +538,7 @@ previous generation 默认按 DATA-044 保留并允许用户提前清理。清�
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-26 | 采用 TD-005 CiphertextIdentity，并明确 sealed generation 只保留权威原附件、派生缩略图清引用后重建。 |
 | 2026-07-26 | 明确 active 动态附件 root 同时覆盖权威原附件和仍被引用的派生缩略图。 |
 | 2026-07-26 | 区分 active 动态附件 root 与 sealed manifest；增加通知数据集 epoch；显式禁用不可信 SQLite trigger/view/ATTACH；统一回滚检查点自动删除资格。 |
 | 2026-07-26 | 接受 SQLCipher capture/export/portable 三路径、candidate-only migration、双槽 generation control、activation marker、不可信 portable reader 和多 root 附件协议。 |
