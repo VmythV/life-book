@@ -1,6 +1,6 @@
 # 生活有谱提醒与系统通知规范
 
-> 项目代号：`life-book` · 版本：v1.7 · 更新日期：2026-07-26 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.8 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：提醒计划、提醒实例、系统调度、通知动作、去重、权限、降级和可靠性边界
 >
@@ -151,7 +151,7 @@ scheduled ──┴──空间/订阅暂停──→ paused ──恢复且仍�
 
 `NotificationInputRevision` 是每个 installation/epoch 从 `0` 开始的 branded TD-006 LongCounter。任何会改变候选、内容、排序、预算、精度、权限、channel、时区/tzdb 或合同结果的业务/设置/能力输入，必须在持有该输入的短事务中 checked `+1`，同时把相关 ReconciliationState 置 `pending`、清 `publishedRunId/scheduledThrough/inputFingerprint/failureCode` 并耐久入队。原生 capability/environment 变化在 App 接收后的首个短事务执行同一失效；输入变化与旧 pointer 不得存在可观察中间态。
 
-每轮对账建立身份绑定 `(reconciliationRunId, installationId, epoch, inputRevision, transport, platform)` 的 `NotificationSchedulingRun`，phase 为 `building | sealed | published | discarded`，并在 building 开始前固定 `inputFingerprint`、`expectedDecisionCount` 和完整候选集。最终 Decision 按 `(recipientSlot, reminderInstanceId)` ASCII 稳定排序后计算 `decisionSetHash`；seal 短事务必须验证行数精确相等、每个候选恰一行且集合 hash 匹配，sealed 后 header 与行不可改写。规范 Decision 投影和 hash 编码由 TD-009 唯一定义。
+每轮对账建立身份绑定 `(reconciliationRunId, installationId, epoch, inputRevision, transport, platform)` 的 `NotificationSchedulingRun`，phase 为 `building | sealed | published | discarded`，并在 building 开始前固定 `inputFingerprint`、`expectedDecisionCount` 和完整候选集。最终 Decision 按 `(recipientSlot, reminderInstanceId)` ASCII 稳定排序后计算 `decisionSetHash`；seal 短事务必须验证行数精确相等、每个候选恰一行且集合 hash 匹配，sealed 后除 phase 的合法终态迁移外，header 其他字段与全部行不可改写或删除。规范 Decision 投影和 hash 编码由 TD-009 唯一定义。
 
 只有最终 guard-CAS 可在同一事务将 sealed run 改为 published，并设置同 epoch/inputRevision/transport/platform 的 `ReconciliationState.publishedRunId`。只有该 state 为 `succeeded/degraded`，pointer 指向的 run 同时匹配当前 active epoch、input revision、transport、platform 和合同时，Decision 才是 current；building、未被指向的 sealed、discarded、部分、旧 epoch 或旧 revision 行永不驱动 UI。`degraded` 可发布完整 Decision 供逐条解释，但不发布全局成功水位，也不抹掉仍全部匹配的单条 accepted Delivery。全部这些投影均为 device-only，不进入 portable backup、业务同步或用户导出。
 
@@ -509,7 +509,7 @@ P0 一律使用滚动窗口内的单次请求，不启用操作系统原生重�
 → 逐项真实平台结果写带 epoch/fingerprint 的 receipt 与 checkpoint
 → 根据预检/选择/最终平台结果为每个候选写恰一条最终 Decision
 → 核对 expected count、候选一对一与 decisionSetHash，将 run seal 为不可变
-→ 重读 active generation/epoch/input revision、domain/settings、environment/capability、tzdb/engine/adapter 全部 guards
+→ 重读 active generation/epoch、NotificationInputRevision、environment/capability、tzdb/engine/adapter 全部 guards
 → 全匹配时以单一 CAS 发布 run + publishedRunId；完整成功才同时发布 succeeded + scheduledThrough + lastSucceededAt
 → guard 变化时 discarded 且耐久入队；平台失败时可发布 degraded 完整 run，但无当前成功水位
 ```
@@ -712,6 +712,7 @@ P1 远程推送用于：
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.8 | 2026-07-26 | 统一对账只使用 NotificationInputRevision 作为业务与设置输入的并发护栏，并明确 sealed run 的合法 phase 终态迁移。 |
 | v1.7 | 2026-07-26 | 增加 NotificationInputRevision、sealed SchedulingRun 和完整 Decision 发布，固定 restore 优先级、Lease B 分类、hidden/open-only 交叉合同、有效呈现合同与单条状态映射。 |
 | v1.6 | 2026-07-26 | 增加逐实例调度 Decision、短 parser/fresh action lease、guard-CAS 水位、确定性恢复映射、validating defer 与 P1 聚合边界。 |
 | v1.5 | 2026-07-26 | 增加 notificationDatasetEpoch payload/fence、ActionInbox 前置门、同 epoch Delivery/水位、整体恢复状态规范化与提交后 degraded reconciliation。 |
