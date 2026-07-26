@@ -1,12 +1,12 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.21 · 更新日期：2026-07-26 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.22 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
 > 不负责：数据库表名与索引、JSON 字段拼写、页面布局、时间算法和阶段归属
 >
-> 依赖文档：[产品需求基线](product-features.md)、[产品路线图](roadmap.md)、[术语表](glossary.md)、[产品决策记录](product-decisions.md)、[提醒规范](reminders-and-notifications.md)、[TD-009 原生提醒调度](adr/0009-native-reminder-scheduler.md)、[TD-010 原子恢复](adr/0010-sqlite-snapshot-migration-and-atomic-restore.md)
+> 依赖文档：[产品需求基线](product-features.md)、[产品路线图](roadmap.md)、[术语表](glossary.md)、[产品决策记录](product-decisions.md)、[提醒规范](reminders-and-notifications.md)、[TD-004 设备密钥与应用锁](adr/0004-device-key-hierarchy-and-app-lock.md)、[TD-009 原生提醒调度](adr/0009-native-reminder-scheduler.md)、[TD-010 原子恢复](adr/0010-sqlite-snapshot-migration-and-atomic-restore.md)
 
 本文定义与客户端框架、数据库和服务端实现无关的逻辑模型。物理存储必须映射到这里，不能通过数据库方便性改变领域含义；机器交换格式由 Schema 和接口契约定义。
 
@@ -36,8 +36,10 @@
 | `ServerVersion` | 服务端为一个同步实体确认的版本。 | 非负整数；0 表示尚未上传，服务端每次接受改变后单调递增。 |
 | `ServerSequence` | 服务端在一个空间内分配的变更顺序。 | 单调递增且不依赖设备时钟；只比较同一空间。 |
 | `LongCounter` | 跨 SQLite/native/JS/接口边界的非负单调计数器。 | `0...9223372036854775807`；递增使用 checked `+1`，不得回绕或用 JavaScript `number`；边界编码遵循 TD-006。 |
-| `NotificationDatasetEpoch` | 隔离不同 active dataset 通知副作用的 branded `LongCounter`。 | 权威值只来自当前 `phase=active` 的受认证 `DatasetControlRecord`；初始化为 `0`，仅提交成功的整体恢复/手动回滚递增。 |
-| `NotificationInputRevision` | current epoch 内使调度结果失效的 branded `LongCounter`。 | 每个 installation/epoch 初始化为 `0`；任何业务、设置、能力或合同输入变化时在入队事务 checked +1，并原子隐藏旧 published run。业务/设置写入遇到上限时拒绝整条命令；已经发生的外部能力变化遇到上限时必须先隐藏旧投影并进入受审维护状态，绝不回绕或沿用旧成功。 |
+| `InstallationRealm` | `(installationId, installationIncarnationId)`。 | 两项均为非空 TD-006 `EntityId`；current/same realm 逐字段相等。incarnation 是随机身份，只能判定缺失、非法或不匹配，不存在先后顺序。 |
+| `NotificationRealm` | `(installationId, installationIncarnationId, notificationDatasetEpoch)`。 | 三项逐字段相等才是同一 realm；dataset generation、input revision、environment generation 或 pair digest 均不能替代其中任一项。 |
+| `NotificationDatasetEpoch` | 隔离同一 installation incarnation 内整体数据集替换通知副作用的 branded `LongCounter`。 | 权威值只来自当前 `phase=active` 的受认证 `DatasetControlRecord`；每个新 incarnation 固定从 `0` 开始，只有提交成功且保持接收设备 Installation/incarnation 的整体恢复/手动回滚 checked `+1`。 |
+| `NotificationInputRevision` | current notification realm 内使调度结果失效的 branded `LongCounter`。 | 每个 notification realm 初始化为 `0`；任何业务、设置、OS/时间、能力、runtime pair 集或合同输入变化时在入队事务 checked +1，并原子隐藏旧 published run。业务/设置写入遇到上限时拒绝整条命令；已经发生的外部事实变化遇到上限时必须更新 runtime set/baseline、隐藏旧投影并进入受审维护状态，绝不回绕或沿用旧成功。 |
 | `ContentHash` | 内容完整性哈希。 | 用于附件、备份和同步校验，不作为加密。 |
 
 所有用户可见文本使用 Unicode。长度按 Unicode 码点校验；存储不得静默截断。
@@ -92,9 +94,9 @@ Any supported source → ReminderPlan → ReminderInstance → NotificationSched
                                                    └── eligible_selected → NotificationDelivery
 Notification response → Lease A fence → NotificationActionInbox
                                       → unlock → fresh Lease B → command/navigation
-Active dataset epoch → NotificationDatasetState revision + registered pair set
-                     → each NotificationReconciliationState.publishedRunId
-                     → complete current Decision run per pair
+Active notification realm → NotificationDatasetState revision + registered pair set
+                          → each NotificationReconciliationState.publishedRunId
+                          → complete current Decision run per pair
 ```
 
 清单模板归属于空间，但不是 `Record`；它通过快照产生清单实例。
@@ -103,15 +105,19 @@ Active dataset epoch → NotificationDatasetState revision + registered pair set
 
 ### 5.1 `Installation` 与 `LocalActor`
 
-P0 初始化时分别生成当前安装和本地作者身份：
+P0 初始化时分别生成当前 Installation/incarnation 和本地作者身份。TD-004 原生 bootstrap/presence anchor 是安装身份权威；SQLite 中恰一项 `Installation` 只作其当前 incarnation 的镜像，不能从数据库路径、portable backup 或通知投影反推安装身份：
 
 | `Installation` 字段 | 类型 | 规则 |
 | --- | --- | --- |
-| `id` | `EntityId` | 当前 App 安装的随机标识，不是硬件指纹。 |
-| `createdAt` | `Instant` | 本次安装初始化时间。 |
-| `appInstallVersion` | 文本 | 首次初始化的 App 版本，只用于兼容和诊断。 |
+| `id` | `EntityId` | 必须等于已认证 TD-004 anchor 的 `installationId`；不是硬件指纹。 |
+| `installationIncarnationId` | `EntityId` | 当前数据与设备能力 incarnation；同一 incarnation 内不可修改。 |
+| `incarnationBootstrapOperationId` | `EntityId` | 创建当前 incarnation 的稳定 bootstrap operation；同一 incarnation 内不可修改。 |
+| `appBuildId` | 文本 | 创建当前 incarnation 的签名构建；普通 App 升级不改写。 |
+| `createdAt` | `Instant` | 当前 incarnation 创建时间，不是 Installation 最初存在时间；普通升级不改写。 |
 
-`Installation` 不进入用户数据备份；卸载重装始终产生新 ID。
+`Installation` 不进入用户数据备份，且不保存 `notificationDatasetEpoch`，后者只由 active control 作为权威。首次安装和卸载重装创建新 Installation/incarnation/bootstrap operation；DATA-091 清除本机保留 Installation ID 和 IAK，但创建新 incarnation/bootstrap operation、keys、LocalActor/default space，并从 notification epoch `0` 走完整 initialize。restore/manual rollback、schema/cipher migration 和 `activation_abort` 都保持接收设备 Installation/incarnation/bootstrap operation；restore/manual rollback 只推进 notification epoch，普通升级不改变上述镜像字段。
+
+`LocalActor` 字段：
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
@@ -120,9 +126,17 @@ P0 初始化时分别生成当前安装和本地作者身份：
 | `claimedByAccountId` | `EntityId?` | P1 认领完成后可设置。 |
 | `createdAt` | `Instant` | 初始化时间。 |
 
-清除本机数据会销毁旧本地身份并生成新身份，但保持当前安装 ID。恢复完整备份会恢复备份中的本地身份，同时保持接收设备自己的安装 ID，避免记录创建人失联或把两个安装误认为同一设备。
+清除本机数据会销毁旧本地身份并生成新身份，但保持当前 Installation ID 并轮换 incarnation。恢复完整备份会恢复备份中的本地身份，同时保持接收设备自己的 Installation/incarnation，避免记录创建人失联或把两个安装误认为同一设备。源数据中的 Installation 行永不导入；受支持的旧内部数据库只能在验证 TD-004 anchor 后生成 mirror，绝不能给缺失 incarnation 的通知投影反填当前身份。
 
-### 5.2 `Space`
+### 5.2 `EmptyCandidateEvidence`
+
+`EmptyCandidateEvidence` 是 TD-010 initialize 使用的一次性、operation-bound typed evidence，不是 portable 领域实体，也不能转换为 migrate/restore capability。它至少绑定 `incarnationBootstrapOperationId`、bootstrap-record digest、Installation/incarnation/epoch `0`、candidate generation、Schema/cipher/root digest、seed-row digest、`notificationInitializationContractVersion=2`、receiving `DeviceStateOverlay` digest 和 runtime registered-pair-set digest。
+
+该 evidence 必须证明 baseline migration 为 `0`、Installation mirror 与 bootstrap anchor 完全一致、新 LocalActor 恰一项、默认 PersonalSpace 恰一项、默认 AppPreferences/ProductCounter 各恰一项、`dataMutationCounter=0`、attachment root 为空，并且没有用户 Record、ReminderPlan、ReminderInstance、sync/outbox 或六类通知设备投影。seed mapper 必须一次性生成这些行；activation marker 或 open receipt 后不得补建、重新生成或按缺省值修复。
+
+candidate seal 前只允许额外存在恰一 dormant notification coordinator task，其完整绑定为 `(operationId=incarnationBootstrapOperationId, candidateGenerationId, installationId, installationIncarnationId, epoch=0, notificationInputRevision=0, registeredPairSetDigest, notificationInitializationContractVersion=2)`，`reason=dataset_initialized` 且 `activationGate/activatedAt=null`。activation-marker 事务必须原子写 typed marker、激活该 task、创建同 realm 恰一 revision-0 active `NotificationDatasetState`（精确 pair set/version/digest、`forcePresentationRefreshRevision=null`）和 runtime pair 集对应的精确全部 revision-0 pending `NotificationReconciliationState`；pair 的 environment/capability/channel/budget 来自 receiving overlay，tzdb/recurrence/adapter/registry 来自签名 build，`publishedRunId/scheduledThrough/lastAttemptedAt/lastSucceededAt/inputFingerprint/failureCode` 全为空。该 realm 的 Run/Decision/Delivery/Inbox/checkpoint/platform receipt/watermark 初始仍为零。任何缺失、多余或跨 realm 行都使初始化完整性失败。owner/pair 身份、初始字段、默认值、registry 规范或 marker/read-back 谓词改变时必须递增 notification initialization contract version，不能在 v2 下静默改变。
+
+### 5.3 `Space`
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
@@ -521,11 +535,11 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 | `deduplicationKey` | 文本 | 同一逻辑提醒稳定唯一。 |
 | `scheduledFor` | `Instant` | 解析时区和偏移后的目标绝对时刻。 |
 | `scheduleResolution` | 解析元数据? | 目标源自 timed local schedule 时保存实际 TimeZoneId、UTC offset 秒数、tzdb 版本和 `exact/gap_shifted_forward/overlap_earlier/overlap_later`；绝对 Instant 不需要。 |
-| `state` | `planned \| scheduled \| paused \| acknowledged \| snoozed \| cancelled \| expired \| failed` | 收件人范围内的逻辑状态；P0 可按当前 installation 证据聚合，P1 只能按 server-owned ReminderDeliveryAggregate 聚合；`delivered` 不作为可可靠确认的业务状态。 |
+| `state` | `planned \| scheduled \| paused \| acknowledged \| snoozed \| cancelled \| expired \| failed` | 收件人范围内的逻辑状态；P0 可按当前 installation incarnation 证据聚合，P1 只能按 server-owned ReminderDeliveryAggregate 聚合；`delivered` 不作为可可靠确认的业务状态。 |
 | `pauseReason` | `space_deletion_scheduled \| subscription_paused`? | paused 时必填；恢复 future 实例时清空，已到期实例改为 expired。 |
 | `acknowledgementKind` | `opened \| done \| skipped \| noted \| shopping_added`? | 必须适合来源。 |
 | `snoozedFromId` | `EntityId?` | 稍后提醒链的上一实例。 |
-| `failureCode` | 受控错误? | 仅 failed 时可有；P0 来自当前 installation 的终态 Decision，P1 只能来自服务端聚合，不保存原始平台消息；恢复规范化离开 failed 时清空。 |
+| `failureCode` | 受控错误? | 仅 failed 时可有；P0 来自当前 installation incarnation 的终态 Decision，P1 只能来自服务端聚合，不保存原始平台消息；恢复规范化离开 failed 时清空。 |
 | 公共元数据 | `EntityMeta` | — |
 
 ### 14.3 `NotificationDelivery`
@@ -536,22 +550,23 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 | --- | --- | --- |
 | `reminderInstanceId` | `EntityId` | 所属逻辑提醒实例。 |
 | `installationId` | `EntityId` | 本地设备槽位；P0 必填，不随业务备份迁移。 |
+| `installationIncarnationId` | `EntityId` | 投递尝试所属 installation incarnation；必填且不能由旧行推断。 |
 | `deviceId` | `EntityId?` | P1 登录设备；同一账号多个 Device 分别投递。 |
 | `transport` | `local_notification \| remote_push` | 本地和远程尝试不能共用平台成功证据。 |
 | `platform` | `ios \| android` | 产生请求的平台；服务端远程路由仍指向目标设备平台。 |
 | `recipientSlot` | 文本 | 同一 ReminderInstance 下稳定、无内容的收件人/设备投递槽；不得包含邮箱、家庭名等可识别内容。 |
-| `platformRequestId` | 文本 | 项目生成的版本化 `lbr2:` 稳定不透明 ID；不包含用户内容。 |
+| `platformRequestId` | 文本 | 项目生成的 request identity v3 `lbr3:` 稳定不透明 ID；绑定 Installation/incarnation/epoch/transport/ReminderInstance/recipientSlot，不包含用户内容。 |
 | `adapterNativeId` | 文本? | 平台/adapter 返回的内部 ID；只能用于本机定向清理，不能成为恢复或幂等身份。 |
 | `notificationDatasetEpoch` | `NotificationDatasetEpoch` | 必填；只有等于当前 active control 的行才可能成为当前证据。 |
-| `attemptSequence` | `LongCounter` | 同一 ReminderInstance、installation/device、transport、platform、recipientSlot、epoch 和 platformRequestId 内从 1 递增；判断最新 attempt，不用设备时间排序。 |
-| `scheduleFingerprint` | ContentHash | 覆盖目标、内容策略、payload/category、隐私和精度；不保存可见文案。 |
-| `privacyIndependentFingerprint` | ContentHash | 覆盖除实际隐私模式及其派生文案/payload/category/action 之外的全部 replace 输入；只用于判断是否为纯隐私放宽，规范投影由 TD-009 唯一定义。 |
+| `attemptSequence` | `LongCounter` | 同一完整投递身份内从 1 递增；判断 latest attempt，不用设备时间排序。 |
+| `scheduleFingerprint` | ContentHash | TD-009 schedule fingerprint v2；覆盖 realm、目标、内容策略、payload/category、隐私和精度，不保存可见文案。 |
+| `privacyIndependentFingerprint` | ContentHash | TD-009 privacy-independent fingerprint v2；覆盖除实际隐私模式及其派生文案/payload/category/action 之外的全部 replace 输入，只用于判断是否为纯隐私放宽。 |
 | `effectivePrivacyMode` | `full \| title_only \| hidden` | 实际提交快照的隐私模式；可能因纯放宽而暂时比当前设置更严格。 |
 | `categoryContractId`、`categoryContractVersion` | 文本、正整数 | 实际提交的类别合同；hidden 使用 open_only v1。 |
-| `actionContractVersion`、`payloadContractVersion`、`requestIdentityContractVersion` | 正整数 | 实际提交的版本化合同。 |
+| `actionContractVersion`、`payloadContractVersion`、`requestIdentityContractVersion` | 正整数 | 当前 writer 分别使用登记的 action 合同、payload v3 和 request identity v3；未知或旧身份只能清理，不能形成 current evidence。 |
 | `status` | `requested \| accepted \| observed_trigger \| observed_action \| cancelled \| rejected \| missing` | 语义以 REM-013 为准；accepted 只表示平台 API 接受。 |
 | `evidence` | `ios_pending \| android_registry_only \| adapter_receipt \| none` | Android registry 不能单独证明 AlarmManager 仍有请求。 |
-| `requestedPrecision` | `exact \| approximate \| not_applicable` | Android 降级必须可观察；iOS 为 not_applicable。 |
+| `requestedPrecision` | `exact \| approximate \| not_applicable` | Android local 降级必须可观察；iOS local 和任一 remote pair 固定为 not_applicable。 |
 | `environmentGeneration` | 非负整数 | 调度使用的平台能力/环境代次；变化时旧证据失效。 |
 | `capabilityFingerprint` | `ContentHash` | 本次提交所用权限、渠道、精度、预算和 adapter 能力摘要；不含用户内容。 |
 | `requestedAt`、`acceptedAt`、`observedAt`、`cancelledAt` | `Instant?` | 适用状态写入；不用它们决定跨设备先后。 |
@@ -559,24 +574,25 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 | `adapterContractVersion` | 正整数 | 解释 receipt、evidence 和 adapter metadata 的固定合同版本。 |
 | 公共元数据 | `EntityMeta` | — |
 
-当前证据的唯一身份至少绑定 `(reminderInstanceId, installation/device slot, transport, platform, recipientSlot, notificationDatasetEpoch, platformRequestId, attemptSequence)`。同一身份的最新 attempt 必须 `status=accepted`，且 request ID、epoch、schedule fingerprint、precision、environment generation、capability fingerprint 和 adapter contract 全部匹配当前输入；最新 requested/rejected/missing/cancelled 使较早 accepted 永久失效。本实体是 device-only 技术事实，不进入 portable backup。
+完整投递身份为 `(reminderInstanceId, installationId, installationIncarnationId, device slot, transport, platform, recipientSlot, notificationDatasetEpoch, platformRequestId)`；物理 attempt 行的唯一身份再加 `attemptSequence`。同一完整身份的 latest attempt 必须 `status=accepted`，且完整 realm、lbr3 request identity/payload v3、schedule fingerprint、precision、environment generation、capability fingerprint 和 adapter contract 全部匹配 current pair 输入，才是 ordinary current evidence；最新 requested/rejected/missing/cancelled 使较早 accepted 永久失效。本实体是 device-only 技术事实，不进入 portable backup。
 
-隐私比较不能先要求 schedule fingerprint 匹配。`privacyComparisonCandidate` 固定为同一完整 delivery identity（不含 attemptSequence）的 latest attempt，且 current epoch/request ID/precision/environment generation/capability fingerprint/adapter contract 全匹配并为 accepted；初筛刻意不比较 schedule fingerprint。纯隐私放宽时，若 current desired 与该 candidate 的 `privacyIndependentFingerprint` 相同且 NotificationDatasetState 没有 force marker，desired mapper 采用 candidate 的 `effectivePrivacyMode/category/action` 作为 `effectiveScheduledPresentationContract`，再重算 schedule fingerprint；只有重算结果与该 Delivery 的 schedule fingerprint 相等，它才成为普通 current matching evidence。candidate 缺失、base 指纹不同或有 marker 时采用 current desired 合同并 replace，不能循环引用“matching accepted”。
+隐私比较不能先要求 schedule fingerprint 匹配。`privacyComparisonCandidate` 固定为同一完整 delivery identity（不含 attemptSequence）的 latest attempt，且 current realm/lbr3 request identity/payload v3/precision/environment generation/capability fingerprint/adapter contract 全匹配并为 accepted；初筛刻意不比较 schedule fingerprint。纯隐私放宽时，若 current desired 与该 candidate 的 `privacyIndependentFingerprint` 相同且 NotificationDatasetState 没有 force marker，desired mapper 采用 candidate 的 `effectivePrivacyMode/category/action` 作为 `effectiveScheduledPresentationContract`，再重算 schedule fingerprint；只有重算结果与该 Delivery 的 schedule fingerprint 相等，它才成为普通 current matching evidence。candidate 缺失、base 指纹不同或有 marker 时采用 current desired 合同并 replace，不能循环引用“matching accepted”。
 
 用户的明确更新选择必须成为 NotificationDatasetState 上绑定目标 input revision 的 device-only 耐久意图，并由 coordinator task 镜像唤醒；只有全部 registered transport/platform pair 的 guarded succeeded 结果都确认适用 replace/cancel 后才可清除，不能依赖一次内存事件或单个 pair 成功。`open_only` 是任意仍获授权目标的严格只导航子集，来源后来变为非敏感时仍允许该旧 open response 在 fresh Lease B 下导航，但绝不能恢复来源类别 mutating action。隐私收紧时先清旧内容快照；只有收紧后的当前有效呈现合同已经撤销旧 category/action（例如转为 hidden/open_only）时，清理前到达的旧动作才只能 `business_noop`。仅 `full→title_only` 且 category/action 未变时仍按 fresh Lease B 的当前授权和状态执行，不能把文案收紧误当作动作撤权。
 
 ### 14.4 `NotificationActionInbox`
 
-表示已经通过 active dataset epoch 与 request-ID fence 的通知 response。旧、缺失、非法或 future epoch response 在写入前就永久 no-op，因此不创建本实体。
+表示已经通过 active notification realm 与 request-ID fence 的通知 response。incarnation 缺失、非法或不匹配，或 epoch 旧、缺失、非法、溢出或 future 的 response 在写入前就永久 targetless no-op，因此不创建本实体；incarnation 是随机 EntityId，不作 future/old 排序。
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
-| `actionInboxId` | `ContentHash` | TD-009 canonical hash 幂等键；相同通知动作重放只返回既有结果。 |
+| `actionInboxId` | `ContentHash` | TD-009 action identity v3 canonical hash 幂等键；输入包含 Installation/incarnation/epoch、transport、request/category/action 与三项合同版本，相同通知动作重放只返回既有结果。 |
 | `responseId` | 文本 | transport 回调身份；与 platformRequestId 分离。 |
-| `platformRequestId` | 文本 | 已重算并恒时匹配的项目 `lbr2:` ID。 |
+| `platformRequestId` | 文本 | 已从 current anchor/control 重算并恒时匹配的项目 request identity v3 `lbr3:` ID。 |
 | `notificationDatasetEpoch` | `NotificationDatasetEpoch` | 必须等于写入时 active control，并在命令提交前再次匹配。 |
 | `installationId` | `EntityId` | 当前设备；不随备份、同步或手动回滚迁移。 |
-| `transport` | `local_notification \| remote_push` | 决定受控 parser/adapter，不改变 epoch gate。 |
+| `installationIncarnationId` | `EntityId` | 写入时 current incarnation；必填，并在 claim、完成、导航或命令提交前再次匹配。 |
+| `transport` | `local_notification \| remote_push` | 决定受控 parser/adapter，不改变 notification realm gate。 |
 | `categoryContractId`、`categoryContractVersion` | 文本、正整数 | 已登记的 category 合同及其语义版本。 |
 | `actionId` | 文本 | 用户实际动作；只能来自该 category/version allowlist。 |
 | `actionContractVersion`、`payloadContractVersion`、`requestIdentityContractVersion` | 正整数 | 缺失、未来或不兼容版本不得猜测。 |
@@ -584,42 +600,44 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 | `sourceType`、`sourceId` | `hidden` 或业务来源枚举、`EntityId?` | `hidden` 只是 payload 隐私哨兵，不是业务来源类型；解锁后由 reminderInstanceId 反查。 |
 | `spaceId` | `EntityId?` | P2 普通 payload 的可选不透明上下文；hidden 时必须为空，不能作为授权事实。 |
 | `receivedAt`、`processedAt` | `Instant`、`Instant?` | 不用设备时间决定幂等或跨设备顺序。 |
-| `processingState` | `pending \| processing \| applied \| business_noop \| stale_noop \| failed_retryable \| failed_terminal` | `business_noop` 用于 identity current 但来源已经终态/失权/过期；`stale_noop` 用于 inbox 仍在 current dataset/epoch、但同 epoch request identity 已改变的无目标终态。dataset epoch 已替换时旧 row 不进入 target，response 在 current inbox lookup 前永久 no-op。 |
+| `processingState` | `pending \| processing \| applied \| business_noop \| stale_noop \| failed_retryable \| failed_terminal` | `business_noop` 用于 identity current 但来源已经终态/失权/过期；`stale_noop` 只用于 inbox 仍在 current notification realm、但 same-realm request identity 已改变的终态。realm 已替换时旧 row 不进入 target，response 在 current inbox lookup 前永久 targetless no-op。 |
 | `processingAttempt` | `LongCounter` | 初始为 `0`；每次 CAS claim 时 checked +1，不用时间决定最新处理者。 |
 | `claimOwnerSessionId`、`claimToken` | `EntityId?` | 非空当且仅当 processing；绑定当前 App 进程会话与本次 claim，从 processing 进入任一其他状态时原子清空。 |
 | `claimedAt` | `Instant?` | 非空当且仅当 processing，且仅作诊断；退出 processing 时原子清空。claim 有效性使用进程会话与单调时钟，不以可回拨墙钟作正确性依据。 |
 | `resultCode` | 受控无内容码? | 不保存标题、正文、原始 payload 或平台错误。 |
 | 公共元数据 | `EntityMeta` | revision 只跟踪本机 inbox 状态，不参与同步。 |
 
-只有 payload 先通过 bounded 语法、大小、ID grammar、版本、category/action allowlist 与 hidden/open-only 交叉字段校验，随后短 parser Lease A 再通过 active epoch/request/category registry fence，才能创建本实体；actionInboxId 按 TD-009 把 transport 与 categoryContractVersion 纳入版本敏感 hash。`sourceType=hidden` 当且仅当 `categoryContractId=open_only`；此时 category/action version 均为 1、`sourceId=null`、payload 无 spaceId，且 response `actionId` 只能是 open。任一非法组合在 Lease A 前拒绝。敏感通知必须使用该组合，非敏感通知也只有在有效呈现合同选择更严格 open-only 时可用。
+只有 payload 先通过 bounded 语法、大小、ID grammar、payload/request v3、category/action allowlist 与 hidden/open-only 交叉字段校验，随后短 parser Lease A 再通过 active realm/request/category registry fence，才能创建本实体；actionInboxId 使用 TD-009 action identity v3，跨 incarnation 或 transport 永不碰撞。`sourceType=hidden` 当且仅当 `categoryContractId=open_only`；此时 category/action version 均为 1、`sourceId=null`、payload 无 spaceId，且 response `actionId` 只能是 open。任一非法组合在 Lease A 前拒绝。敏感通知必须使用该组合，非敏感通知也只有在有效呈现合同选择更严格 open-only 时可用。
 
-写入 inbox 后立即释放 Lease A，应用锁/用户等待期间不持有 DatasetReadLease。解锁后取得 fresh action/navigation Lease B，先在 then-active Repository 查找同 epoch inbox：dataset 已替换、row 缺失或 epoch 不匹配时只产生无目标 stale 结果，不读取 previous dataset，也不在 target 伪造 row；同 epoch row 存在时才 claim 并重新验证 request identity、当前授权和来源。request identity 已变时以短事务落为终态 `stale_noop`，不得冒充 `business_noop`。mutating action 在 Lease B 下以单一领域事务处理，默认 open 在紧邻导航前也必须通过 Lease B。open 不持久化解析出的目标：router 接受以 actionInboxId 幂等标识、在 Lease B 下重新生成的 NavigationIntent 后把 inbox 置 applied；响应重放即使已有终态结果，也不能绕过 fresh fence 或复用旧目标缓存。
+写入 inbox 后立即释放 Lease A，应用锁/用户等待期间不持有 DatasetReadLease。解锁后取得绑定 then-active Installation/incarnation/generation/epoch 的 fresh action/navigation Lease B，先在 then-active Repository 查找 same-realm inbox：dataset 已替换、row 缺失或 realm 不匹配时只产生 targetless no-op，不读取 previous dataset，也不在 target 伪造 row；same-realm row 存在时才 claim 并重新验证 request identity、当前授权和来源。request identity 已变时以短事务落为终态 `stale_noop`，不得冒充 `business_noop`。mutating action 在 Lease B 下以单一领域事务处理，默认 open 在紧邻导航前也必须通过 Lease B。open 不持久化解析出的目标：router 只接受以 actionInboxId 幂等标识、绑定 current Installation/incarnation/generation/epoch 且在 Lease B 下重新生成的 NavigationIntent，接受后把 inbox 置 applied；响应重放即使已有终态结果，也不能绕过 fresh fence 或复用旧目标缓存。
 
-processor 只有取得 Lease B 后，才能用谓词 `(actionInboxId, processingState=pending|failed_retryable, processingAttempt=expected, claimOwnerSessionId=null, claimToken=null, claimedAt=null)` CAS：把 attempt checked `+1` 并设置新 owner/token/claimedAt 后进入 processing。完成必须在仍持有同 claim 与 Lease B 时迁移为 `applied/business_noop/stale_noop/failed_retryable/failed_terminal`，并在同一事务把三个 claim 字段全部清空；业务 mutation、inbox 终态、输入修订和后续对账任务仍是一个事务。attempt 已达 LongCounter 上限时不得 claim，而是在 Lease B 下以 `failed_terminal + resultCode=action_processing_attempt_exhausted` 终结，claim 字段保持全空且不执行业务动作。
+processor 只有取得 Lease B 后，才能用谓词 `(actionInboxId, installationId, installationIncarnationId, notificationDatasetEpoch, processingState=pending|failed_retryable, processingAttempt=expected, claimOwnerSessionId=null, claimToken=null, claimedAt=null)` CAS：把 attempt checked `+1` 并设置新 owner/token/claimedAt 后进入 processing。完成必须在仍持有同 claim、same-realm Lease B 和同 active generation 时迁移为 `applied/business_noop/stale_noop/failed_retryable/failed_terminal`，并在同一事务把三个 claim 字段全部清空；业务 mutation、inbox 终态、输入修订和带 full realm 的后续对账任务仍是一个事务。attempt 已达 LongCounter 上限时不得 claim，而是在 Lease B 下以 `failed_terminal + resultCode=action_processing_attempt_exhausted` 终结，claim 字段保持全空且不执行业务动作。
 
-每个 App 进程拥有随机 session ID；启动时立即把其他 session 遗留的 processing claim 回收到 pending，并清空三个 claim 字段，同一 session 的单调时钟 watchdog 也以 token-fenced CAS 做同样回收。`failed_retryable` 只能由带退避的耐久任务重新入队；Repository 再次 active、App 启动/前台和成功解锁都必须幂等扫描 pending/到期 retryable。Lease B 暂不可得时不 claim，保持 pending 并保留耐久唤醒任务，因此崩溃、锁屏或数据集切换都不会永久卡住 inbox。
+每个 App 进程拥有随机 session ID；启动时只在 current realm Repository 内把其他 session 遗留的 processing claim 回收到 pending，并清空三个 claim 字段，同一 session 的单调时钟 watchdog 也以 realm/token-fenced CAS 做同样回收。旧 incarnation 的 claim 永不转入新 Repository。`failed_retryable` 只能由带退避且绑定 full realm 的耐久任务重新入队；Repository 再次 active、App 启动/前台和成功解锁都必须幂等扫描 pending/到期 retryable。Lease B 暂不可得时不 claim，保持 pending 并保留耐久唤醒任务，因此崩溃、锁屏或数据集切换都不会永久卡住 inbox。
 
 `validating`、integrity-blocked 或 Repository 未开放时的 `deferred_unclassified` 只是瞬时分类，不创建 inbox、不写 App 明文暂存、不清平台 last response/目标通知。notification subsystem 第一次重新进入 active 必须主动 re-fetch 平台 last response 并从 bounded parse 重跑；若 adapter 不保证保留，只能 targetless fallback 并记录无内容诊断。
 
 ### 14.5 `NotificationDatasetState`
 
-每个 `(installationId, notificationDatasetEpoch)` 恰有一项 device-only owner，统一拥有跨 transport/platform 的输入修订、pair fan-out 和明确隐私刷新意图；不得让多个 ReconciliationState 各自成为 revision 真值。
+每个 notification realm 恰有一项 device-only owner，逻辑唯一键为 `(installationId, installationIncarnationId, notificationDatasetEpoch)`；它统一拥有跨 transport/platform 的输入修订、pair fan-out 和明确隐私刷新意图，不得让多个 ReconciliationState 各自成为 revision 真值。
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
 | `installationId` | `EntityId` | 当前安装；不进入 portable backup。 |
+| `installationIncarnationId` | `EntityId` | 当前 incarnation；非空且不从 legacy projection 推断。 |
 | `notificationDatasetEpoch` | `NotificationDatasetEpoch` | 必须等于 active control；dataset replacement 新建 revision 0 owner。 |
-| `notificationInputRevision` | `NotificationInputRevision` | 当前 epoch 唯一权威值；全部 pair state/run/Decision 只镜像它。 |
-| `revisionState` | `active \| exhausted` | exhausted 时禁止全部 notification platform write 和 current publish，直到受审迁移或新 epoch。 |
-| `registeredPairs` | 排序集合 | 每项为 `(transport, platform, mode=active|retiring)`；来自签名 registry，并保留尚未确认清理的 retiring pair。权限/channel 不改变成员资格。 |
-| `registeredPairSetVersion` | 正整数 | pair registry 语义版本。 |
+| `notificationInitializationContractVersion` | 正整数 | 创建本 realm owner/pair 的初始化合同；当前为 `2`，同 realm 内不可改写。 |
+| `notificationInputRevision` | `NotificationInputRevision` | 当前 notification realm 唯一权威值；全部 pair state/run/Decision 只镜像它。 |
+| `revisionState` | `active \| exhausted` | exhausted 时禁止全部 notification platform write 和 current publish，直到受审迁移或新 notification realm。 |
+| `registeredPairs` | 排序集合 | 每项为 `(transport, platform, mode=active|retiring)`；签名 registry 只约束允许项，runtime 集由真实 OS、`transportEnabled` 与无内容 `hasManagedEvidence` 派生，并保留尚未确认清理的 retiring pair。不得把签名允许列表直接持久化成 runtime 集；权限/channel 不改变成员资格。 |
+| `registeredPairSetVersion` | 正整数 | 当前固定为 `1`；pair registry 语义版本。 |
 | `registeredPairSetDigest` | `ContentHash` | 对完整排序 pair 集计算；coordinator task、pair state 和 input fingerprint 必须匹配。 |
 | `forcePresentationRefreshRevision` | `NotificationInputRevision?` | 用户明确扩大已安排呈现时设置为当次新 revision；后续 revision 继承原值，直到全部 pair 完成才清。 |
 | `updatedAt` | `Instant` | 诊断时间，不决定顺序。 |
 
-registered pair 只包含当前 installation 的实际 OS platform；P0 是该平台的 `local_notification`，P1 仅在远程合同启用时增加同平台 `remote_push`，绝不构造 iOS×Android 笛卡尔积。移除 transport 时，只要仍有 managed evidence 就以 retiring pair 参与空 desired 清理；确认清空后才能在下一次全局 revision 删除。
+registered pair 只包含当前 installation incarnation 的实际 OS platform；P0 是该平台的 `local_notification`，P1 仅在 TD-022 完整远程合同启用时增加同平台 `remote_push`，绝不构造 iOS×Android 笛卡尔积。移除 transport 时，只要仍有 managed evidence 就以 retiring pair 参与空 desired 清理；确认清空后才能在下一次全局 revision 删除。
 
-任一候选、内容、设置、能力、pair registry 或任一 pair 专属合同输入变化，都在一个短事务锁定本 owner：checked `+1`，更新适用 receiving-device baseline/pair set，把**全部** registered pair 的 ReconciliationState 创建或置 pending，并镜像新 revision/digest、清 current pointer/水位/inputFingerprint/failureCode，再 upsert 一个绑定 `(installationId, epoch, revision, pairSetDigest)` 的 coordinator task。选择保守全 fan-out，禁止只推进某个 transport 后让其他 pair 留在旧 revision。各 pair 可独立发布 succeeded/degraded，但 coordinator 只有在精确 pair 集的每一行都为同 revision/digest 的 succeeded、且适用 replace/cancel 已确认后才完成；degraded/pending/缺行都保留任务。`forcePresentationRefreshRevision` 只能在验证上述全集的 global finalize 事务清除，单个 pair 的 publish 无权清除。
+任一候选、内容、排序、预算、设置、权限、channel、时区/tzdb、capability、pair registry 或任一 pair 专属合同输入变化，都在一个短事务锁定本 owner：checked `+1`，更新适用 receiving-device baseline/pair set，把**全部** registered pair 的 ReconciliationState 创建或置 pending，并镜像新 revision/digest、清 current pointer/水位/inputFingerprint/failureCode，再 upsert 一个绑定 `(installationId, installationIncarnationId, epoch, revision, pairSetDigest)` 的 coordinator task。选择保守全 fan-out，禁止只推进某个 transport 后让其他 pair 留在旧 revision。各 pair 可独立发布 succeeded/degraded，但 coordinator 只有在精确 pair 集的每一行都为 same-realm、同 revision/digest 的 succeeded、且适用 replace/cancel 已确认后才完成；degraded/pending/缺行都保留任务。`forcePresentationRefreshRevision` 只能在验证上述全集的 global finalize 事务清除，单个 pair 的 publish 无权清除。
 
 ### 14.6 `NotificationSchedulingDecision`
 
@@ -628,23 +646,24 @@ registered pair 只包含当前 installation 的实际 OS platform；P0 是该�
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
 | `installationId` | `EntityId` | 当前设备；不随业务数据迁移。 |
-| `notificationDatasetEpoch` | `NotificationDatasetEpoch` | 非 current epoch 永不可见。 |
+| `installationIncarnationId` | `EntityId` | 本轮所属 incarnation；非空。 |
+| `notificationDatasetEpoch` | `NotificationDatasetEpoch` | 只有 full realm current 时才可见。 |
 | `notificationInputRevision` | `NotificationInputRevision` | 必须等于 NotificationDatasetState 的唯一权威 revision 和本 pair ReconciliationState 镜像值。 |
 | `transport` | `local_notification \| remote_push` | 不同 transport 的决策身份不可碰撞。 |
 | `platform` | `ios \| android` | 与对应 ReconciliationState 一致。 |
 | `reminderInstanceId` | `EntityId` | 当前设备候选。 |
 | `recipientSlot` | 文本 | 与 Delivery 相同的稳定无内容投递槽。 |
 | `reconciliationRunId` | `EntityId` | 本轮随机、不透明身份；只有等于 ReconciliationState.publishedRunId 才可见。 |
-| `platformRequestId` | 文本? | 有当前期望请求时为项目 `lbr2:` ID；不使用 adapterNativeId。 |
-| `scheduleFingerprint` | `ContentHash` | 当前候选身份/内容/精度合同摘要，不含可见内容。 |
+| `platformRequestId` | 文本? | P0 local pair 每条 Decision 必须是非空项目 request identity v3 `lbr3:` ID，即使被权限、渠道、预算或 unsupported 分支阻断也先确定该身份；可空只为未来由对应 ADR 明确定义的非本地 transport 保留，不得用 null/空串或 adapterNativeId 凑行。 |
+| `scheduleFingerprint` | `ContentHash` | TD-009 schedule fingerprint v2；当前候选 realm/身份/内容/精度合同摘要，不含可见内容。 |
 | `decision` | `eligible_selected \| permission_blocked \| channel_blocked \| capacity_deferred \| unsupported \| retryable_error \| terminal_error` | exact 被拒但选用 approximate 时仍是 eligible_selected。 |
 | `reasonCode` | 受控无内容码? | 解释阻断/失败，不保存平台原始消息。 |
-| `requestedPrecision` | `exact \| approximate \| not_applicable` | 与当前候选或失败尝试一致。 |
+| `requestedPrecision` | `exact \| approximate \| not_applicable` | Android local 可为 exact/approximate；iOS local 和任一 remote pair 固定为 not_applicable。 |
 | `environmentGeneration` | 非负整数 | 与本轮固定平台环境一致。 |
-| `inputFingerprint` | `ContentHash` | 覆盖 active generation/epoch、`NotificationInputRevision`、capability/environment、tzdb/engine/adapter 合同等最终 CAS guards；不得另造含义重叠的 domain/settings 全局 revision。 |
+| `inputFingerprint` | `ContentHash` | TD-009 input fingerprint v2；精确覆盖 Installation/incarnation、active generation、epoch/revision/pair digest、pair mode、capability/environment、tzdb/engine/adapter 及全部最终 CAS guards；不得另造含义重叠的 domain/settings 全局 revision。 |
 | `computedAt` | `Instant` | 诊断时间，不用于决定发布先后。 |
 
-唯一键为 `(installationId, notificationDatasetEpoch, notificationInputRevision, transport, platform, recipientSlot, reminderInstanceId, reconciliationRunId)`。`eligible_selected` 表示最终选择未被能力/预算/错误阻断；平台已经 accepted 时仍以 Delivery 作为更强单条证据，平台 retryable/terminal 失败则 Decision 必须改为相应 error。实现可预写 building run rows，但只有所属 run 完整 sealed 且 ReconciliationState 的最终 guard-CAS 发布相同 run，行才成为 current projection。
+唯一键为 `(installationId, installationIncarnationId, notificationDatasetEpoch, notificationInputRevision, transport, platform, recipientSlot, reminderInstanceId, reconciliationRunId)`。Decision→Run 必须以 `reconciliationRunId + realm + revision + transport + platform` 形成复合关系，禁止跨 incarnation 连接。`eligible_selected` 表示最终选择未被能力/预算/错误阻断；平台已经 accepted 时仍以 Delivery 作为更强单条证据，平台 retryable/terminal 失败则 Decision 必须改为相应 error。实现可预写 building run rows，但只有所属 run 完整 sealed 且 ReconciliationState 的最终 guard-CAS 发布相同 run，行才成为 current projection。
 
 没有 matching accepted Delivery 时，固定显示映射为：permission_blocked→“等待通知权限”，channel_blocked→“提醒渠道已关闭”，capacity_deferred→“等待补齐”，eligible_selected/retryable_error→“正在重新检查”，unsupported/terminal_error→“失败”。不得把 eligible_selected 单独写成“已安排”。
 
@@ -654,46 +673,60 @@ registered pair 只包含当前 installation 的实际 OS platform；P0 是该�
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
-| `reconciliationRunId` | `EntityId` | 随机、不透明，本 installation 内不复用。 |
-| `installationId`、`notificationDatasetEpoch`、`notificationInputRevision`、`transport`、`platform` | 见上 | 与本轮所有 Decision 和 ReconciliationState 一致。 |
+| `reconciliationRunId` | `EntityId` | 随机、不透明，本 installation incarnation 内不复用。 |
+| `installationId`、`installationIncarnationId`、`notificationDatasetEpoch`、`notificationInputRevision`、`transport`、`platform` | 见上 | 与本轮所有 Decision 和 ReconciliationState 一致；均非空。 |
 | `registeredPairSetDigest` | `ContentHash` | 必须等于 current NotificationDatasetState；pair set 改变使本轮不可发布。 |
 | `phase` | `building \| sealed \| published \| discarded` | 只有 sealed 可参与最终发布；published/discarded 终态且不可改写。 |
 | `inputFingerprint` | `ContentHash` | 本轮所有最终 guards 的规范摘要。 |
 | `expectedDecisionCount` | 非负整数 | 完整候选集合应有的 Decision 行数。 |
-| `decisionSetHash` | `ContentHash?` | sealed 起必填；对按 `(recipientSlot, reminderInstanceId)` ASCII 稳定排序的规范 Decision 投影计算。 |
+| `decisionSetHash` | `ContentHash?` | sealed 起必填；使用 TD-009 Decision projection v2，对含 full realm、按 `(recipientSlot, reminderInstanceId)` ASCII 稳定排序的规范 Decision 投影计算。 |
 | `builtAt`、`sealedAt`、`publishedAt` | `Instant?` | 仅用于诊断，不决定顺序。 |
 
-seal 短事务必须同时验证同 run 行数恰等于 `expectedDecisionCount`、每个候选恰一行且规范集合 hash 匹配；sealed 后除 `phase` 的合法终态迁移外，header 其他字段和全部 Decision 行不可修改或删除。最终 guard-CAS 在同一事务把 run 从 sealed 改 published，并设置 ReconciliationState.publishedRunId；guard 变化则把 sealed run 改 discarded 并重排。building 崩溃行、未被指向的 sealed run 和 discarded run 永不可见，可在安全保留期后回收。
+Run 的逻辑身份为 `(reconciliationRunId, installationId, installationIncarnationId, notificationDatasetEpoch, notificationInputRevision, registeredPairSetDigest, transport, platform)`。seal 短事务必须同时验证同 run 行数恰等于 `expectedDecisionCount`、每个候选恰一行且规范集合 hash 匹配；sealed 后除 `phase` 的合法终态迁移外，header 其他字段和全部 Decision 行不可修改或删除。最终 guard-CAS 在同一事务把 run 从 sealed 改 published，并以 full realm/revision/digest/pair 复合关系设置 ReconciliationState.publishedRunId；guard 变化则把 sealed run 改 discarded 并重排。building 崩溃行、未被指向的 sealed run 和 discarded run 永不可见，可在安全保留期后回收。
 
 ### 14.8 `NotificationReconciliationState`
 
-NotificationDatasetState 的每个 registered pair 恰有一项 `(installationId, notificationDatasetEpoch, transport, platform)`；非 registered pair 不得存在 active state。它用于解释当前设备的 pair 调度覆盖，不是 ReminderPlan/Instance 的业务事实。
+NotificationDatasetState 的每个 registered pair 在同 notification realm 下恰有一项，逻辑键为 `(installationId, installationIncarnationId, notificationDatasetEpoch, transport, platform)`；非 registered pair 不得存在 current state。它用于解释当前设备 incarnation 的 pair 调度覆盖，不是 ReminderPlan/Instance 的业务事实。
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
 | `installationId` | `EntityId` | 当前设备。 |
+| `installationIncarnationId` | `EntityId` | 当前 incarnation；与 owner、run、Decision 和 task 逐字段一致。 |
 | `notificationDatasetEpoch` | `NotificationDatasetEpoch` | 与 active control 不同即整体失效。 |
+| `notificationInitializationContractVersion` | 正整数 | 必须等于 same-realm owner、task、typed marker和 open receipt；当前为 `2`。 |
 | `notificationInputRevision` | `NotificationInputRevision` | NotificationDatasetState current revision 的 pair 镜像；最终 CAS 必须同时精确匹配 owner。 |
 | `registeredPairSetDigest` | `ContentHash` | 必须等于 NotificationDatasetState 当前 digest；用于 coordinator 完整性检查。 |
 | `transport` | `local_notification \| remote_push` | 分别发布本地/远程设备投影。 |
 | `platform` | `ios \| android` | 分别维护平台预算与证据。 |
-| `state` | `pending \| running \| succeeded \| degraded` | succeeded 只证明该 epoch 的一次完整对账。 |
-| `publishedRunId` | `EntityId?` | pending/running 必须为空；succeeded/degraded 必须指向同 inputRevision/epoch/transport/platform 且 phase=published 的完整 run。 |
-| `scheduledThrough` | `Instant?` | 仅 same-epoch succeeded 可非空并作为覆盖水位；pending/running/degraded 必须为空。 |
+| `state` | `pending \| running \| succeeded \| degraded` | succeeded 只证明该 notification realm 的一次完整对账。 |
+| `publishedRunId` | `EntityId?` | pending/running 必须为空；succeeded/degraded 必须以 full realm/revision/digest/transport/platform 指向 `phase=published` 的完整 run。 |
+| `scheduledThrough` | `Instant?` | 仅 same-realm succeeded 可非空并作为覆盖水位；pending/running/degraded 必须为空。 |
 | `lastAttemptedAt` | `Instant?` | succeeded/degraded 完成一次 guarded run 时设置；不代表成功。 |
 | `lastSucceededAt` | `Instant?` | 仅 succeeded 可作为当前“最近成功”；其他状态即使保留历史诊断值也不得展示为当前。 |
-| `environmentGeneration` | 非负整数 | 平台能力环境代次；不得代替 dataset epoch。 |
+| `environmentGeneration` | 非负整数 | 平台能力环境代次；不得代替 notification realm。 |
 | `capabilityFingerprint` | `ContentHash` | 覆盖权限、适用 channel/presentation、精度、预算和 adapter 能力，不含内容。 |
 | `inputFingerprint` | `ContentHash?` | succeeded/degraded 发布 run 的全部 guard 摘要；pending/running 为空。 |
 | `budget` | 非负整数 | 本轮固定平台预算。 |
 | `tzdbVersion`、`recurrenceEngineVersion`、`adapterContractVersion` | 版本 | 任一不匹配使水位失效并触发重算。 |
 | `failureCode` | 受控无内容码? | degraded 时解释重试原因。 |
 
-普通输入失效只按 NotificationDatasetState 的全 pair fan-out 事务推进；本行不得独立递增 revision。业务/设置命令在 owner revision 已达上限时整体失败且不改变输入。原生 capability/environment 是已经发生、不能拒绝的外部事实：若失效事务发现上限，必须原子把 owner 置 `revisionState=exhausted`、保留最大 revision、把全部 pair state 置 pending，并清 `publishedRunId/scheduledThrough/inputFingerprint/failureCode`，同时保存新 `environmentGeneration`；若已取得规范化新 capability snapshot，也保存其新 `capabilityFingerprint`，绝不清空这个非空字段。若当前只能确认 environment dirty 而 capability probe 失败，可保留 last-observed capability fingerprint 作为非当前诊断值，但 pending+exhausted 永不能把它当证据；写 `notification_revision_exhausted` 耐久维护任务并停止全部新 platform write/current publish，直到受审迁移或新 dataset epoch 重置。原生变化在被 App 接收的首个短事务执行上述失效；此前最新 Delivery 也因 environment/capability/owner 状态不匹配不能声称当前。
+普通输入失效只按 NotificationDatasetState 的全 pair fan-out 事务推进；本行不得独立递增 revision。业务/设置命令在 owner revision 已达上限时整体失败且不改变输入。OS 权限、时区/tzdb、真实 OS、transport enablement、无内容 managed evidence、capability/environment 或签名 pair registry 变化都是已经发生、不能拒绝的外部事实：若失效事务发现上限，必须原子把 owner 置 `revisionState=exhausted`、保留最大 revision，并从 receiving baseline 与签名 registry 重新派生、保存完整 runtime pair set/version/digest；删除不再 registered 的 current pair state，把精确新集合的每项创建或置 pending，镜像最大 revision/新 digest 并清 `publishedRunId/scheduledThrough/inputFingerprint/failureCode`，同时保存各 pair 最新 `environmentGeneration`。若已取得规范化 capability snapshot，还保存对应非空 `capabilityFingerprint/budget`；若 probe 失败，只能保留 last-observed fingerprint 作为非当前诊断值，pending+exhausted 永不能把它当证据。事务写 `notification_revision_exhausted` 耐久维护任务并停止全部新 platform write/current publish，直到受审迁移或新 notification realm 重置；不得回绕、清空非空 capability fingerprint、保留集合外 current pair 或继续展示旧成功。外部变化在被 App 接收的首个短事务执行上述失效；此前最新 Delivery 也因 environment/capability/owner 状态不匹配不能声称当前。
 
-每个 pair 的最终短事务先重读 NotificationDatasetState `revisionState=active`、revision、pair-set digest 与所有 guards，并验证 sealed run 的 expected count/hash：全匹配且完整成功时 CAS 为 succeeded；平台结果失败时可 CAS 为 degraded 并发布完整 Decision run，但不发布成功水位；guard 变化或崩溃不发布本轮 run。pair succeeded 不代表 coordinator 完成，也无权清 force marker；global finalize 仍按 14.5 验证全集。真实平台 receipt 可以保留为非当前技术事实。
+每个 pair 的最终短事务先重读 NotificationDatasetState 的 full realm、`revisionState=active`、revision、pair-set digest 与所有 guards，并验证 sealed run 的 expected count/hash：全匹配且完整成功时 CAS 为 succeeded；平台结果失败时可 CAS 为 degraded 并发布完整 Decision run，但不发布成功水位；guard 变化或崩溃不发布本轮 run。pair succeeded 不代表 coordinator 完成，也无权清 force marker；global finalize 仍按 14.5 验证全集。真实平台 receipt 可以保留为非当前技术事实，但不能跨 incarnation 成为证据。
 
-### 14.9 `ReminderDeliveryAggregate`（P1）
+### 14.9 通知设备投影共同围栏
+
+六类通知投影的 `installationIncarnationId` 全部非空。任何 unique、foreign key、published pointer、latest-attempt grouping、claim CAS、current-evidence 查询或清理选择器都必须包含完整 notification realm；不允许只以 Installation ID + epoch、run ID、request ID 或业务 ID 跨 incarnation 连接。历史 Delivery/run 可以保留，但不能成为 current pointer；旧 realm 行不能改写 identity 后移入新 realm。
+
+普通 coordinator task 的幂等身份固定为 `(installationId, installationIncarnationId, notificationDatasetEpoch, notificationInputRevision, registeredPairSetDigest)`，reason set 只作合并解释而不参与身份；initialize/restore/manual rollback 的 dormant task还绑定 `operationId + candidateGenerationId + notificationInitializationContractVersion`，其中 initialize 固定 `reason=dataset_initialized` 且 operationId 是 incarnation bootstrap operation，restore/manual rollback固定 `reason=dataset_epoch_changed`。coordinator/runner task、lease、checkpoint、platform receipt、watermark、run 和 pair state 均携带 realm、revision、pair digest及适用 transport/platform；只有 TD-004 bootstrap/presence、active control 与 Repository open 全部匹配时，才可签发绑定 Installation/incarnation/active generation/epoch 的短 `DatasetReadLease`。任何 external call 前后及最终 publish 前都重新验证这些 guard。
+
+所有 notification platform port 调用和返回使用显式 `NotificationPlatformEnvelope(operationRealm, value)`，其中 operationRealm 是完整三元 realm；adapter 必须原样回显，application 在使用任何返回前重读 active realm，不匹配则整体丢弃。managed artifact snapshot 只返回 request ID、合同版本、`parsed|legacy|invalid` 状态、可空 artifact incarnation/epoch、fingerprint 和必要无内容 metadata；不得返回 title/body/raw payload，也不得给 legacy artifact 伪造 Installation/incarnation/epoch。legacy/mismatch artifact 只能定向清理并在确认前占用预算，不能成为 current evidence。
+
+系统 payload v3 必须携带规范 `installationIncarnationId` 和 `notificationDatasetEpoch`，但不显式携带 Installation ID；parser 从 current authenticated bootstrap/control 取得 Installation ID并重算 transport-bound lbr3 request identity。缺失或不匹配的 incarnation/epoch、旧 payload/request版本都不能用 current 值补全。
+
+原生 environment dirty generation/bitset 是唯一不绑定业务目标 realm 的无内容失效信号；它只能唤醒 application 重新读取 then-current realm 并推进 owner revision，不能独立读取业务数据、调用通知平台、发布投影、导航或执行命令。
+
+### 14.10 `ReminderDeliveryAggregate`（P1）
 
 服务端为一个收件人范围 ReminderInstance 维护无内容的跨设备聚合，客户端不能从本机 device-only 行猜测：
 
@@ -706,7 +739,7 @@ NotificationDatasetState 的每个 registered pair 恰有一项 `(installationId
 | `computedAt` | `Instant` | 服务端计算时间。 |
 | `serverSequence` | `ServerSequence` | 客户端只按同空间序列应用。 |
 
-`acceptedDeviceCount > 0` 时 aggregateState=scheduled；`applicableDeviceCount > 0` 且 `terminalFailedDeviceCount = applicableDeviceCount` 时为 failed；其余为 planned。设备状态只按服务端确认的最新 device session tenure 和带版本报告进入一个桶，缺失/过期报告进入 pending，不得乐观算 accepted。该投影不进入 portable backup，也不含设备名称、推送 token、通知内容或原始错误。TD-020/022 必须在 P1 上线前固定设备失活期限、报告幂等键和并发合并；在此之前客户端只展示当前 installation 状态。
+`acceptedDeviceCount > 0` 时 aggregateState=scheduled；`applicableDeviceCount > 0` 且 `terminalFailedDeviceCount = applicableDeviceCount` 时为 failed；其余为 planned。设备状态只按服务端确认的最新 device session tenure 和带版本报告进入一个桶，缺失/过期报告进入 pending，不得乐观算 accepted。该投影不进入 portable backup，也不含设备名称、推送 token、通知内容或原始错误。TD-020/022 必须在 P1 上线前固定设备失活期限、报告幂等键和并发合并；在此之前客户端只展示当前 installation incarnation 状态。
 
 `NotificationDelivery`、`NotificationActionInbox`、`NotificationDatasetState`、`NotificationSchedulingDecision`、`NotificationSchedulingRun` 和 `NotificationReconciliationState` 都是 device-only，不进入 portable backup、业务同步或用户导出；ReminderDeliveryAggregate 是 server-owned redacted projection，只通过受控同步读取。
 
@@ -716,59 +749,86 @@ NotificationDatasetState 的每个 registered pair 恰有一项 `(installationId
 
 #### DOM-071：收件人状态与设备投递分离
 
-ReminderInstance 在一个 subscription/收件人范围内共享。P0 当前 installation 的同一身份最新 attempt 全部合同匹配且 accepted 时可从 planned 聚合为 scheduled；证据失效而实例仍有效时回 planned。P1 只有 server-owned ReminderDeliveryAggregate 可以把至少一个适用 Device accepted 聚合为 scheduled；客户端不得从本机行推断设备全集。
+ReminderInstance 在一个 subscription/收件人范围内共享。P0 当前 installation incarnation 的同一完整投递身份 latest attempt 全部合同匹配且 accepted 时可从 planned 聚合为 scheduled；证据失效而实例仍有效时回 planned。P1 只有 server-owned ReminderDeliveryAggregate 可以把至少一个适用 Device accepted 聚合为 scheduled；客户端不得从本机行推断设备全集。
 
-P0 只有本 installation 终态失败且没有 accepted/待重试 attempt 时可进入 failed；P1 只有服务端聚合确认全部当前适用设备终态失败时可进入 failed。权限未询问/拒绝、渠道关闭、容量不足或暂时没有活跃设备时保持 planned。单条“已安排/近似”从 latest matching Delivery 派生；等待权限/补齐/失败只从 state∈{succeeded,degraded} 且 epoch/inputRevision/transport/platform/publishedRunId 全匹配的 Decision 派生；无 current Decision 且 state 缺失/pending/running/degraded 时显示“正在重新检查”。全局水位只来自 same-epoch succeeded ReconciliationState。
+P0 只有本 installation incarnation 终态失败且没有 accepted/待重试 attempt 时可进入 failed；P1 只有服务端聚合确认全部当前适用设备终态失败时可进入 failed。权限未询问/拒绝、渠道关闭、容量不足或暂时没有活跃设备时保持 planned。单条“已安排/近似”从 latest matching Delivery 派生；等待权限/补齐/失败只从 state∈{succeeded,degraded} 且 realm/inputRevision/pair digest/transport/platform/publishedRunId 全匹配的 Decision 派生；无 current Decision 且 state 缺失/pending/running/degraded 时显示“正在重新检查”。全局水位只来自 same-realm succeeded ReconciliationState。
 
 #### DOM-072：平台证据不等于送达
 
-NotificationDelivery accepted、iOS pending、Android adapter registry、远程推送供应商 receipt 和 observed trigger/action 都不能证明用户看到通知。Android 跳过重挂还必须同时具有当前 epoch registry 匹配和相同 platformRequestId、fingerprint、precision、environment generation、capability fingerprint、adapter contract 的最新 accepted attempt；较早或其他 epoch 的 accepted 不能覆盖较新的 requested/rejected/missing/cancelled。
+NotificationDelivery accepted、iOS pending、Android adapter registry、远程推送供应商 receipt 和 observed trigger/action 都不能证明用户看到通知。Android 跳过重挂还必须同时具有 current-realm registry 匹配和相同 lbr3 platformRequestId、fingerprint、precision、environment generation、capability fingerprint、adapter contract 的 latest accepted attempt；较早、其他 incarnation 或其他 epoch 的 accepted 不能覆盖较新的 requested/rejected/missing/cancelled。
 
 #### DOM-073：通知数据集隔离
 
-- `notificationDatasetEpoch` 的唯一权威是当前 `phase=active` 的受认证 `DatasetControlRecord`；control 不可读、phase 非 active 或 Repository 尚未开放时，不签发通知 read lease，不调度、不写 ActionInbox、不导航目标、不执行命令；
-- NotificationDatasetState、Delivery、ActionInbox、Decision、SchedulingRun、ReconciliationState、reconcile task/checkpoint、scheduled-through、request ID 和 payload 携带的 epoch 都只是 control 权威值的镜像；缺失、非法、旧或 future epoch 永久 no-op，不能更新当前 ReminderInstance/Delivery、打开目标或产生 mutation；
+- notification realm 的 Installation/incarnation 必须同时由 TD-004 bootstrap/presence 和当前 `phase=active` 的受认证 `DatasetControlRecord` 逐字段确认，epoch 的唯一权威是该 active control；任一 anchor/control 不可读、身份不匹配、phase 非 active 或 Repository 尚未开放时，不签发通知 read lease，不调度、不写 ActionInbox、不导航目标、不执行命令；
+- NotificationDatasetState、Delivery、ActionInbox、Decision、SchedulingRun、ReconciliationState、reconcile task/checkpoint、scheduled-through、request ID 和 payload 携带的 realm 都只是上述权威值的镜像；incarnation 缺失、非法或不匹配，以及 epoch 缺失、非法、旧或 future，均永久 targetless no-op，不能更新当前 ReminderInstance/Delivery、打开目标或产生 mutation；
 - `environmentGeneration` 只表示权限、时间/时区、重启和 adapter 等平台环境变化，与 dataset epoch 不可互换；
-- committed restore/manual rollback checked `+1`；`validating` 无 marker 回 previous 保持原 epoch，marker 后完成 target 不再次递增，schema/cipher migration 保持 epoch；
-- restore/manual rollback 的 mapper 优先级固定为：① `acknowledged/snoozed/cancelled/expired` 业务终态保持；②其余实例的来源按 REM-021 已失效时转 `cancelled`；③ `paused` 原因仍成立时保持，否则 future 转 `planned`、past 转 `expired` 并清 pauseReason；④其余 `scheduled/failed` 在来源仍有效时 future/past 都转 `planned` 并清 failureCode，past 只派生 application-only 待查看且永不补发；⑤原 `planned` 且来源仍有效时保持 planned，past 永不重挂。mapper 排除六类通知设备投影和旧 task；candidate 只预建一个绑定 target epoch/revision 0/pair-set digest、activation gate 为空的 dormant coordinator task，activation-marker transaction 再原子激活该 task、创建一项 revision-0 active NotificationDatasetState 和精确全部 revision-0 pending registered-pair ReconciliationState。marker 前不得提前创建这些 owner/pair 投影；schema/cipher migration 不执行该规范化或初始化。
+- fresh、reinstall 和 DATA-091 clear 后的新 incarnation 从 epoch `0` 开始；clear 保持 Installation 但轮换 incarnation，reinstall 新建二者。committed restore/manual rollback 保持接收设备 Installation/incarnation并对 epoch checked `+1`；`validating` 无 marker 的 `activation_abort` 恢复完整 prior realm，marker 后完成 target 不再次递增，schema/cipher migration 保持 realm；
+- restore/manual rollback 的 mapper 优先级固定为：① `acknowledged/snoozed/cancelled/expired` 业务终态保持；②其余实例的来源按 REM-021 已失效时转 `cancelled`；③ `paused` 原因仍成立时保持，否则 future 转 `planned`、past 转 `expired` 并清 pauseReason；④其余 `scheduled/failed` 在来源仍有效时 future/past 都转 `planned` 并清 failureCode，past 只派生 application-only 待查看且永不补发；⑤原 `planned` 且来源仍有效时保持 planned，past 永不重挂。mapper 排除六类通知设备投影和旧 task；candidate 只预建一个绑定 operation/candidate/full target realm/revision 0/pair-set digest、activation gate 为空的 dormant coordinator task，activation-marker transaction 再原子激活该 task、创建一项 same-realm revision-0 active NotificationDatasetState 和精确全部 same-realm revision-0 pending registered-pair ReconciliationState。marker 前不得提前创建这些 owner/pair 投影；schema/cipher migration 不执行该规范化或初始化。
 
 这里“来源失效”只按 REM-021 的穷举谓词判断；不得另造含义重叠的“不可操作”分支把同一输入写成 expired。若未来需要对仍有效但过久的 application-only 提醒自动过期，必须在 REM-032 新增按来源可测试的确定规则和迁移，而不能由 restore mapper 猜测。
 
 #### DOM-074：通知动作租约分段
 
-parser Lease A 只覆盖预先完成 bounded syntax/allowlist/cross-field 校验后的 active epoch/request/category fence 与 inbox 写入，随后立即释放；人机解锁等待不持有租约。解锁后无法取得 Lease B 时保持 inbox pending 并 defer，不能误标 stale。取得 fresh action/navigation Lease B 后，dataset/epoch 已改变或 current inbox 不存在时直接 targetless no-op，不访问 previous、也不在 target 建 row；同 epoch inbox 存在但 request identity 已变化时才以 `stale_noop` 终结且不得解析目标；identity 仍 current 但授权、来源、动作或 category 语义已不允许时，在短事务消费 inbox 为 `business_noop`。mutating command 在 Lease B 下原子提交，默认 open 在紧邻导航前也必须 fresh fence。`validating` 等无法分类阶段不创建 inbox，并按 REM-062 defer。
+parser Lease A 只覆盖预先完成 bounded syntax/allowlist/cross-field 校验后的 active realm/lbr3 request/category fence 与 inbox 写入，随后立即释放；人机解锁等待不持有租约。解锁后无法取得 Lease B 时保持 inbox pending 并 defer，不能误标 stale。取得绑定 then-active Installation/incarnation/generation/epoch 的 fresh action/navigation Lease B 后，dataset 已改变、realm 不匹配或 current inbox 不存在时直接 targetless no-op，不访问 previous、也不在 target 建 row；same-realm inbox 存在但 request identity 已变化时才以 `stale_noop` 终结且不得解析目标；identity 仍 current 但授权、来源、动作或 category 语义已不允许时，在短事务消费 inbox 为 `business_noop`。mutating command 在 Lease B 下原子提交，默认 open 在紧邻导航前也必须 fresh fence。`validating` 等无法分类阶段不创建 inbox，并按 REM-062 defer。
 
 #### DOM-075：通知对账发布原子性
 
-任何调度输入变化必须由 NotificationDatasetState 原子推进一次 revision，并把完整 registered pair 集的 current publishedRunId/成功水位清空后进入 pending。每个 pair 的 Decision 集合只有完整 sealed count/hash、owner revision/pair-set digest 与全部 guards 匹配，并与其 ReconciliationState 在同一 CAS transaction 发布时可见；部分 building rows、旧 epoch/revision/digest、discarded 或未被指向的 run 永远不可驱动 UI。degraded 可发布完整 Decision 供逐条解释，但不能发布全局成功水位；仍匹配的 accepted Delivery 不因此失效。单 pair publish 不完成 global coordinator，也不能清 force marker；全集 finalize 条件以 14.5 为准。
+任何调度输入变化必须由 same-realm NotificationDatasetState 原子推进一次 revision，并把完整 registered pair 集的 current publishedRunId/成功水位清空后进入 pending。每个 pair 的 Decision 集合只有完整 sealed count/hash、owner realm/revision/pair-set digest 与全部 guards 匹配，并与其 ReconciliationState 在同一 CAS transaction 发布时可见；部分 building rows、旧 realm/revision/digest、discarded 或未被指向的 run 永远不可驱动 UI。degraded 可发布完整 Decision 供逐条解释，但不能发布全局成功水位；仍匹配的 accepted Delivery 不因此失效。单 pair publish 不完成 global coordinator，也不能清 force marker；全集 finalize 条件以 14.5 为准。
+
+#### DOM-076：初始化候选不可补建
+
+initialize 只能消费与 TD-004 current initializing anchor 完全匹配的 `EmptyCandidateEvidence`。marker 前 seed 集、唯一 dormant task 和六类通知投影零集合必须符合 5.2；marker transaction 中的 marker、task、owner 与精确 pair 必须 same-realm 且 all-or-nothing。只有 active control、typed marker/evidence、matching ActivationOpenReceipt、TD-004 active anchor、activation-recovery reopen 和完整 read-back 全部成立，才可把同一 handle 升级为普通业务 Repository、返回 `Initialized` 并接受首笔业务写；marker/receipt 后不得以普通启动、ORM 默认值或 repair migration 补建任何缺失行。
+
+#### DOM-077：设备本地异步执行隔离
+
+任何 device-local task、claim、operation、外部调用 envelope 或回调至少携带非空 `InstallationRealm`；读取或修改 active dataset 的普通工作还绑定 current `activeGenerationId`，并在创建、claim、外部调用前、结果返回后和最终提交前逐字段复核 current active control、TD-004 anchor 与 Repository open。只有 initialize/migrate/restore/manual rollback/clear 等 maintenance-operation-scoped 工作额外绑定其 operation/control sequence；普通既有 task 不绑定 active operation/control sequence，因为 `activation_abort` 会在保持 Installation/incarnation/generation/epoch 和既有 task/state 时重新锚定 prior generation。旧 incarnation/generation 的行或迟到结果只能成为 terminal no-op/quarantine，不得改写 identity 后移入 current realm；current facts仍需要的工作必须重新创建。notification 工作在此基础上再绑定 epoch/revision/pair digest，其他子域仍保留自己的 revision、binding generation、membership tenure、snapshot generation、content hash 或幂等键，任何一种 guard 都不能替代另一种。
 
 ## 15. 设置与本地产品状态
 
 ### 15.1 `AppPreferences`
 
-按安装保存非内容设置：
+`AppPreferences` 可以物理合表，但每列必须声明恢复策略，restore/manual rollback 逐字段合并，禁止对混合 row 使用 source-wins 或 receiving-device-wins 整行覆盖：
 
-- 地区、语言、周起始日和当前时区；
-- 通知内容模式、应用静默时段和默认重复催促设置；
-- 应用锁是否开启和自动锁定时机；
-- 智能首次说明确认版本；
-- 可选遥测同意版本；
-- 备份提示是否展示、上次关闭时间；
-- 最近一次成功备份和恢复时间；提醒对账时间/水位只能保存在带 `notificationDatasetEpoch` 的 `NotificationReconciliationState`，不能以裸时间存在；
-- 当前数据库、备份和契约版本。
+| 字段组 | 恢复策略 | 规则 |
+| --- | --- | --- |
+| `weekStartsOn`、通知内容模式、应用静默时段、默认重复催促 | `portable_user_preference` | 从已认证 portable source 恢复；变化按需推进提醒 input revision。 |
+| 备份提示是否展示、上次关闭时间 | `portable_user_preference` | 可恢复，避免换数据集后重复打扰；不等于最近备份事实。 |
+| 地区、语言、`currentTimeZoneId` | `receiving_device_or_system` | 保留/重新探测接收设备当前值；时区变化由 TD-007/TD-009 失效未来投影。 |
+| 应用锁是否开启、自动锁定时机 | `receiving_device` | 保留当前设备策略；源备份不得关闭或放宽接收设备门禁。 |
+| 智能首次说明确认版本 | `receiving_policy_revalidate` | 保留 current 值；版本或地区要求变化时重新确认。 |
+| 可选遥测、法律同意版本 | `receiving_policy_revalidate` | 不从 source 覆盖；按当前地区、版本和政策重新确认。 |
+| 最近成功备份/恢复时间 | `receiving_device_runtime` | 不从 source 覆盖；本次 restore 成功边界后更新。 |
+| 数据库、backup、Schema 和合同版本 | `derived_current_build` | 由已激活 candidate 与签名 build 写入，不接受 portable 值。 |
 
-安全密钥、API Key 和令牌只保存安全存储引用，不直接成为 `AppPreferences` 值。
+提醒对账时间、成功水位和 pair 状态只能保存在带完整 notification realm 的 `NotificationReconciliationState`，不能在 AppPreferences 保存裸时间。安全密钥、API Key、BYOK 和令牌只保存受控安全存储引用或 capability，不直接成为 AppPreferences 值，也不进入 portable backup。
 
 ### 15.2 `ProductCounter`
 
-为了不扫描内容计算渐进提示，可以本地保存只增计数：
+为了不扫描内容计算渐进提示，可以本地保存产品计数，但每列有独立生命周期：
 
-- 用户主动创建真实记录总数；
-- 安装日期；
-- 首次真实记录日期；
-- 备份提示展示次数和日期。
+| 字段 | 恢复策略 | 规则 |
+| --- | --- | --- |
+| `incarnationStartedAt` | `receiving_device` | 等于当前 Installation incarnation 的创建时间；restore/manual rollback/migration 保持，fresh/clear/reinstall 初始化新值。不得继续使用含义含糊的“安装日期”。 |
+| `userCreatedRecordCount` | `portable_product_state` | 用户主动创建真实记录时递增；restore/import 本身不增加，删除不减少；DATA-091 clear 重置。 |
+| `firstUserCreatedRecordAt` | `portable_product_state` | 第一条真实用户创建记录的日期；restore/import 不伪造新日期；clear 重置。 |
+| `backupPromptDisplayCount`、`lastBackupPromptAt` | `portable_product_state` | 与备份提示偏好共同恢复；clear 重置。 |
 
-恢复或导入不增加真实创建计数，删除不减少计数。该计数不用于用户绩效展示。
+这些计数不用于用户绩效展示。initialize seed mapper 必须创建恰一默认 ProductCounter；不得因 marker 后发现缺行而补建。
+
+### 15.3 `DeviceStateOverlay`
+
+`DeviceStateOverlay` 是 initialize/restore/manual rollback preflight 读取的 receiving-device 无内容快照，不是 portable 业务实体。它逐字段绑定当前 Installation/incarnation、Database/Attachment/DatasetControl key capability、应用锁策略与认证能力、系统权限、AccountSession/token reference、BYOK reference、遥测/法律同意的当前设备要求，以及每个受支持 notification pair 的下列字段：
+
+| pair 字段 | 规则 |
+| --- | --- |
+| `transport`、`platform` | 只允许签名 registry 支持且属于当前真实 OS 的 pair。 |
+| `environmentGeneration` | 接收设备当前无内容环境代次；dataset replacement 本身不推进。 |
+| `capabilityFingerprint` | 覆盖适用 posting/channel/presentation/precision/budget/adapter 能力。 |
+| `budget` | 当前 build/设备允许的非负预算。 |
+| `transportEnabled` | 当前设备/账号是否启用该 transport；权限拒绝不改变成员资格。 |
+| `hasManagedEvidence` | 无内容布尔；禁用 transport 但仍有证据时派生 retiring pair。 |
+
+overlay 不得包含 platform request ID、adapter native ID、Delivery、ActionInbox 或 receipt。tzdb/recurrence/adapter 合同、pair registry/version/digest 算法和 `notificationInitializationContractVersion=2` 来自签名 build，不属于 overlay。overlay 与 build 只初始化 target notification realm 的 owner/pair baseline；marker 后观察到值变化时，以一次 owner revision checked `+1` 全 pair fan-out，不能改写 initialization snapshot或增加 epoch。
 
 ## 16. 操作记录与同步扩展
 
@@ -817,13 +877,16 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 
 ### 16.3 `Device` 与 `AccountSession`
 
-`Installation` 代表一次本地安装；登录后服务端为该账号与安装建立 `Device`：
+`Installation` 是稳定安装槽位，incarnation 表示其当前设备数据/能力 realm；登录后服务端为该账号与 Installation 建立一段 `Device` 登记 tenure。每个 `(accountId, installationId)` 最多一项 `status=active` 的 Device，revoked 历史可保留且重新登录创建新 Device ID；incarnation 本身不创建新 Device tenure，但其 current 值必须由认证注册更新：
 
 | `Device` 字段 | 类型 | 规则 |
 | --- | --- | --- |
 | `id` | `EntityId` | 服务端设备登记 ID。 |
 | `accountId` | `EntityId` | 所属账号。 |
-| `installationId` | `EntityId` | 随机安装标识；同账号内唯一，不是硬件指纹。 |
+| `installationId` | `EntityId` | 随机安装标识；同账号最多一项 active Device 使用该值，不是硬件指纹。 |
+| `currentInstallationIncarnationId` | `EntityId` | 服务端最后完成认证注册的 current incarnation；只作相等判断，不能按随机 ID 比较先后。 |
+| `realmRegistrationVersion` | `ServerVersion` | 每次接受新的 incarnation 或 notification epoch 注册时推进；迟到请求不能覆盖更高版本。 |
+| `realmUpdatedAt` | `Instant` | 服务端接受 current realm 的诊断时间，不替代版本。 |
 | `displayName` | 文本 | 默认由平台和用户可改名称组成，不含广告标识。 |
 | `platform` | `ios \| android \| web` | 受控值。 |
 | `status` | `active \| revoked` | revoked 不可恢复，重新登录产生新 Device。 |
@@ -842,12 +905,40 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 
 令牌、私钥和验证码不进入普通领域数据库、备份、同步或审计摘要。
 
+#### `NotificationDeviceRegistration`（P1）
+
+远程推送使用 server-owned registration，不能复用本机 adapter registry 或只依赖 Device/Installation ID：
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `id` | `EntityId` | 一段注册 tenure 的服务端稳定 ID。 |
+| `deviceId` | `EntityId` | 指向同账号 active Device。 |
+| `installationId` | `EntityId` | 必须等于 Device.installationId。 |
+| `installationIncarnationId` | `EntityId` | 注册时经过认证的 current incarnation；非空。 |
+| `notificationDatasetEpoch` | `NotificationDatasetEpoch` | 注册时 current active control 的 epoch。 |
+| `transport` | `remote_push` | 固定；本地通知不进入此表。 |
+| `platform` | `ios \| android` | 与目标 Device 和 current runtime pair 一致。 |
+| `recipientSlot` | 文本 | 稳定、无内容的设备投递槽。 |
+| `provider` | 受控枚举 | 具体供应商由 TD-022 登记，不接受任意文本。 |
+| `providerTokenRef` | 安全引用 | 服务端加密/受控 secret 引用；明文 token 不进入日志、用户导出或普通客户端数据库。 |
+| `registrationContractVersion` | 正整数 | 解释注册 proof、token 和回执的合同版本。 |
+| `serverVersion` | `ServerVersion` | token 或 realm 更新的 CAS 版本。 |
+| `status` | `active \| retired \| revoked` | retired/revoked 不能重新激活；新 tenure 创建新 ID。 |
+| `registeredAt`、`retiredAt` | `Instant`、`Instant?` | 服务端时间；不用于判断 realm 新旧。 |
+
+每个 `(deviceId, transport, platform, recipientSlot)` 最多一项 active registration。新的 authenticated realm 注册必须在一个服务端事务中 retire 旧 active、建立新 active、更新 Device current incarnation/realmRegistrationVersion；same-realm token rotation 以 expected serverVersion CAS。restore/manual rollback 保持 Device/Installation/incarnation并注册 epoch `+1`；DATA-091 clear 保持 Device/Installation但新 incarnation、epoch `0`，旧 registration 立即非 current；reinstall 的新 Installation 建立新 Device/registration。账号 session 是否在 clear 后保留由 DATA-090 的用户选择决定，但没有 active session/proof 时不得静默建立新 registration。
+
+remote request/payload 必须携带目标设备 current incarnation+epoch和 transport-bound lbr3 identity；本地 parser仍从 TD-004 bootstrap/control取得 Installation ID重算并执行同一 ActionInbox/Lease B fence。stale registration、push、provider receipt或 response均 fail closed；服务端尚未获知新 realm 时旧 push即使展示，其动作也只能 targetless no-op。TD-022 完成其注册 proof、失活期限、供应商映射和报告合并合同前，`remote_push` 不得进入 runtime pair set。
+
 ### 16.4 `DatasetBinding`
 
 `DatasetBinding` 是当前本地数据集与账号个人空间的设备内绑定，防止把退出后保留的数据误传给另一个账号：
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
+| `installationId` | `EntityId` | receiving device Installation；不从 source binding 导入。 |
+| `installationIncarnationId` | `EntityId` | current incarnation；clear/reinstall 后旧 binding 不得执行。 |
+| `activeGenerationId` | `EntityId` | 当前本地数据集 generation；任何 workflow callback 必须重新匹配。 |
 | `localSpaceId` | `EntityId` | 当前数据集唯一默认个人空间。 |
 | `accountId` | `EntityId?` | bound/paused 时为其来源账号。 |
 | `remoteSpaceId` | `EntityId?` | 完成认领后与 localSpaceId 使用同一稳定 ID。 |
@@ -856,7 +947,9 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 | `lastCompletedStep` | 受控枚举? | 崩溃后恢复认领，不代表业务数据已上传。 |
 | `bindingGeneration` | 正整数 | 每次认领/解绑尝试递增，丢弃迟到响应。 |
 
-这里的“认领”仅指云端为空的 direct claim：它只建立身份映射，不批量改写 Record 的 ID、createdByActorId 或历史 AuditEvent；LocalActor 通过 claimedByAccountId 解析为当前账号。双方都有数据时属于 import + adopt，完成后本地原子采用远端 Space.id，候选对象按 DATA-071 保留或重映射 ID，不得套用 direct claim 的 ID 承诺。选择“仅本机”时保持 unbound，已登录账号的云端个人空间不挂载为第二个本地默认个人空间。
+每个 `(installationId, installationIncarnationId, activeGenerationId, localSpaceId)` 至多一项 current binding。analyze/bind/detach 的 task、claim、request 和 response 都绑定该 tuple、`bindingGeneration` 与 claim token；任何一项变化时迟到结果不得改变 current binding，也不得把旧 row 改绑到新 incarnation/generation。
+
+这里的“认领”仅指云端为空的 direct claim：它只建立身份映射，不批量改写 Record 的 ID、createdByActorId 或历史 AuditEvent；LocalActor 通过 claimedByAccountId 解析为当前账号。双方都有数据时属于 import + adopt，完成后本地原子采用远端 Space.id，候选对象按 DATA-071 保留或重映射 ID，不得套用 direct claim 的 ID 承诺。选择“仅本机”时保持 unbound，已登录账号的云端个人空间不挂载为第二个本地默认个人空间。DatasetBinding 是 device-local control，不进入 portable business backup；恢复出的空间/provenance 只能在 receiving realm 新建并重新验证 binding。
 
 ### 16.5 `SpaceMembership` 与 `Invitation`
 
@@ -904,7 +997,9 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 | `resultServerVersion`、`resultServerSequence` | 版本? | acknowledged 时必填。 |
 | `errorCode` | 受控码? | 不含用户内容。 |
 
-`SyncCursor` 每个设备、空间一条，保存最近完整应用的 `ServerSequence`、快照 generation 和更新时间。只有一页变化在本地事务中全部应用后才能推进；游标不是删除或备份时间。
+`SyncMutation` 的 `clientMutationId`、业务 payload 和服务端幂等收据保持 portable，不加入 installation incarnation。设备本地发送执行另用 `SyncDispatchAttempt`/等价 claim envelope，至少绑定 `(clientMutationId, installationId, installationIncarnationId, activeGenerationId, bindingGeneration, snapshotGeneration, claimOwnerSessionId, claimToken, attemptSequence)`；发送前、响应后和写 acknowledged/conflict/rejected 前逐项复核。旧 realm 的网络响应不能消费或重标 current mutation；若 authoritative mutation 在 current realm 仍可发送，由 current sender 建立新 attempt，不改业务幂等 ID。
+
+`SyncCursor` 的 current 执行身份为 `(installationId, installationIncarnationId, activeGenerationId, deviceId, spaceId, snapshotGeneration)`，保存最近完整应用的 `ServerSequence` 和更新时间。只有同一 realm/generation 下的一页变化在本地事务中全部应用，并再次验证 DatasetBinding、membership tenure 与 snapshot generation 后才能推进；游标不是删除或备份时间。portable source 中的 cursor 进度只有在同一 Account、Device、Space 和 snapshot generation 全部验证后，才可由 mapper写成 receiving-realm current cursor，不能直接复制源设备执行身份。
 
 `SubmitStockChange` mutation 的 entityType/entityId 指向家庭物品聚合，payload 固定包含 intentId、recordId、kind、inputMode、requestedDelta 或 targetQuantity、baseLedgerSequence、occurredAt、recordedAt，并可含 note、correctionOfTransactionId；CreateHouseholdItem 在同一版本化 payload 中包含 openingIntentId 与 initialQuantity。实现不得发送由客户端预先计算的 quantityBefore/quantityAfter 作为权威输入。
 
@@ -938,9 +1033,25 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 
 ### 16.9 `AttachmentTransfer` 与云备份元数据
 
-`AttachmentTransfer` 包含 attachmentId、方向、内容哈希、总大小、已确认偏移/分块、状态 `queued | transferring | verifying | available | failed | cancelled`、重试信息和不含路径的错误码。附件元数据只有在内容完整验证并获得访问权限后才能对其他设备显示 available。
+`AttachmentTransfer` 是 device-local 执行状态：
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `id`、`attachmentId` | `EntityId` | transfer 身份与业务附件身份分离。 |
+| `installationId`、`installationIncarnationId`、`activeGenerationId` | `EntityId` | current device/dataset fence；全部非空。 |
+| `attachmentRevision` | `Revision` | transfer 创建时目标附件版本；变化后旧结果不可 promote。 |
+| `direction` | `upload \| download` | 与授权和目标 storage adapter 一致。 |
+| `contentHash` | `ContentHash` | 完整内容期望值；不能只验证分块偏移。 |
+| `totalBytes`、`confirmedOffsetOrChunks` | 非负精确整数/集合 | 断点续传进度，不用浮点。 |
+| `state` | `queued \| transferring \| verifying \| available \| failed \| cancelled` | available 只在完整验证与 current fence/授权复核后进入。 |
+| `claimOwnerSessionId`、`claimToken` | `EntityId?` | transferring/verifying 时用于 token-fenced claim；退出时原子清空。 |
+| retry/error 字段 | 受控值 | 有限退避且不含路径、文件名或用户内容。 |
+
+网络请求/回执和文件 promote 必须回显并复核 Installation/incarnation/generation、attachment revision/content hash与 claim token；旧 realm 回调不得绑定或删除 current bytes。附件元数据只有在内容完整验证并获得当前访问权限后才能对其他设备显示 available。当前仍需的 transfer 从 Attachment 权威事实新建，不能给旧 transfer 改写 fence。
 
 `CloudBackup` 只保存恢复副本的管理元数据：accountId、可选 spaceId、备份 ID、创建设备、createdAt、formatVersion、schemaVersion、byteSize、contentHash、状态 `creating | available | deleting | deleted | failed` 和可选恢复 generation。备份内容、加密和恢复语义仍以数据生命周期与备份契约为准；CloudBackup 不携带 SyncCursor，也不冒充实时同步点。
+
+`CloudBackup`、AuditEvent、Tombstone、Record、ReminderPlan/Instance 等业务或服务端事实不加入 installation incarnation；围栏属于创建、上传、下载、恢复或清理它们的 device-local operation/lease。backup/upload/restore、search/today/thumbnail rebuild、attachment/file GC、export/share cleanup 和通用持久副作用 task 都适用 DOM-077。
 
 ### 16.10 `OwnershipTransfer`
 
@@ -1000,9 +1111,9 @@ ReminderPlan 属于家庭业务记录；`ReminderSubscription` 决定哪个 Acco
 | 创建普通记录 | `Record`、对应详情和初始标签关系。 |
 | 未绑定创建家庭物品/服务端接受创建 | `Record`、详情、accepted opening 意图、opening 流水、确认/预估缓存、适用低库存周期和提醒任务。 |
 | 绑定空间本地创建家庭物品 | provisional Record、详情、pending opening 意图、SyncMutation 和 projectedQuantityCache；不创建确认流水、周期或通知。 |
-| 编辑记录 | 根版本、详情和受影响提醒对账任务。 |
-| 完成/跳过周期实例 | 实例物化、状态、操作记录和提醒取消任务。 |
-| 清单批量完成 | 所有目标项目、派生完成状态和提醒取消任务。 |
+| 编辑记录 | 根版本、详情和绑定 current notification realm/revision/pair digest 的受影响提醒对账任务。 |
+| 完成/跳过周期实例 | 实例物化、状态、操作记录和绑定 current notification realm 的提醒取消任务。 |
+| 清单批量完成 | 所有目标项目、派生完成状态和绑定 current notification realm 的提醒取消任务。 |
 | 未绑定库存变化 | accepted 意图、新流水、确认/预估数量缓存、低库存周期变化和适用提醒任务。 |
 | 绑定库存提交 | pending 意图、预估数量缓存和同步 mutation；不创建流水或低库存周期。 |
 | 服务端库存接受 | accepted 意图、新流水、确认数量缓存、低库存周期变化和适用提醒任务。 |
@@ -1010,13 +1121,14 @@ ReminderPlan 属于家庭业务记录；`ReminderSubscription` 决定哪个 Acco
 | 删除到回收站 | 根生命周期、未来提醒取消任务和必要操作记录。 |
 | 恢复记录 | 根生命周期、派生索引重建标记和未来提醒重建任务。 |
 | 永久删除记录 | 聚合子对象、附件清理任务和适用墓碑。 |
-| 通知响应入箱 | 短 Lease A 下的 epoch/request/category fence 与幂等写 `NotificationActionInbox`；不包含解锁、用户等待、导航或业务 mutation。 |
-| 处理会改变状态的通知动作 | fresh Lease B 下消费 current-epoch `NotificationActionInbox`、领域 mutation、业务幂等结果、inbox 终态和后续提醒输入 revision/对账任务；任一步失败整体回滚。 |
-| 发布通知对账轮次 | sealed run 的完整 Decision 集、run phase、ReconciliationState.publishedRunId/state，以及仅成功时的 scheduledThrough/lastSucceededAt；以全部 guards 做单一 CAS，平台调用不在事务内。 |
+| initialize activation marker | typed marker、激活唯一 dormant task、same-realm revision-0 owner和精确全部 pending pair；Run/Decision/Delivery/Inbox/checkpoint/receipt/watermark 保持零，任一步失败整体回滚。 |
+| 通知响应入箱 | 短 Lease A 下的 full realm/lbr3 request/category fence 与幂等写 `NotificationActionInbox`；不包含解锁、用户等待、导航或业务 mutation。 |
+| 处理会改变状态的通知动作 | fresh Lease B 下消费 current-realm `NotificationActionInbox`、领域 mutation、业务幂等结果、inbox 终态和绑定 full realm 的后续提醒 input revision/对账任务；任一步失败整体回滚。 |
+| 发布通知对账轮次 | same-realm sealed run 的完整 Decision 集、run phase、ReconciliationState.publishedRunId/state，以及仅成功时的 scheduledThrough/lastSucceededAt；以 realm/revision/digest/pair及全部 guards 做单一 CAS，平台调用不在事务内。 |
 
-通知 action command 提交前必须再次验证 fresh Lease B 绑定的 active generation/epoch；若 activation 已使 lease 失效，事务整体中止。TD-010 activation exclusive gate 只等待当前短 parser/action/reconciler lease 和已进入事务的提交/回滚，不等待应用锁或用户操作；尚未进入事务的 processor defer/no-op，不能在两个 dataset generation 间完成半个动作。
+通知 action command 提交前必须再次验证 fresh Lease B 绑定的 Installation/incarnation/active generation/epoch；若 activation 已使 lease 失效，事务整体中止。TD-010 activation exclusive gate 只等待当前短 parser/action/reconciler lease 和已进入事务的提交/回滚，不等待应用锁或用户操作；尚未进入事务的 processor defer/no-op，不能在两个 dataset generation 间完成半个动作。
 
-操作系统通知、文件删除和网络发送不可能与数据库处于同一原子事务；领域事务写入可重放任务，再由适配层执行并对账。
+操作系统通知、文件删除和网络发送不可能与数据库处于同一原子事务；领域事务必须在写业务事实时原子写入携带 DOM-077 current fence、输入版本和幂等键的可重放任务，再由适配层执行并对账。adapter 回执不因 task ID 匹配就可提交，还必须重新验证该 fence 和子域 guard。
 
 ## 18. 全局领域不变量
 
@@ -1115,21 +1227,87 @@ StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接
 - 改变不变量时必须评估现有数据修复、备份兼容、同步冲突和智能草稿迁移。
 - 派生缓存算法改变后增加缓存版本并允许重建，不改写历史事实。
 - 任何 ID、时间和数量语义变化都属于高风险迁移，需要技术决策和往返测试。
+- Installation mirror 新字段只能从已认证 TD-004 current bootstrap/presence anchor 写入；数据库已有 `id/appInstallVersion`、文件路径、旧 control 或通知行都不能独立证明 current incarnation。缺 current anchor 的数据不得通过默认值升级为可写 Repository。
+- 首个可保留开发/公开通知基线直接使用 lbr3/request identity v3、payload v3、ActionInbox identity v3、schedule/privacy/input/Decision projection v2 和 notification initialization v2，不伪造已发布的 v1/v2 兼容历史。
+- 已有内部 fixture 的通知升级必须走签名 `projection_reset`：保持 current Installation/incarnation/epoch 和 ReminderPlan/ReminderInstance，但绝不把缺 `installationIncarnationId` 的六类旧投影反填为 current realm。旧行从 current tables 删除；确需审计时只能转入无内容、不可变、永久 `non_current/terminal_noop` 且位于所有 current unique/FK/query path 外的 `LegacyNotificationProjectionQuarantine`。
+- 旧 NotificationActionInbox 不进入新版 Inbox 且永不执行；旧 published run/pointer、水位和 input fingerprint 全部失效。migration 只从 authenticated current realm、current build、现行 Plan/Instance 和 receiving DeviceStateOverlay 重建 owner、精确 pair 与 coordinator task，不复用旧 pointer、水位、receipt 或 fingerprint。
+- lbr1/lbr2 pending、delivered 或 adapter registry 只是平台遗留物，只能定向 cleanup，并在确认前占用容量；future desired 重新使用 lbr3/payload-v3。`projection_reset` 不增加 epoch、不轮换 incarnation，schema/cipher migration也保持合法 same-realm设备投影。
+- 缺 realm 的旧 device-local task、claim、cursor、binding 或 transfer 不能补成 current；从 current authoritative facts 重建仍需要的工作。portable business facts和 SyncMutation 幂等身份按各自 mapper保留，不因本地执行投影缺 realm 而伪造 incarnation。
+- realm-aware schema 写入后，不支持 `installationIncarnationId` 的旧二进制不得作为可回滚版本；未知更高合同版本只能只读/安全清理，不能执行 notification action、remote registration 或 device-local mutation。
+- AppPreferences/ProductCounter 的物理拆分或合并迁移必须逐列携带 15.1/15.2 policy；未知 policy 或试图整行覆盖时阻止 activation。
 
-## 22. 变更记录
+## 22. 领域合同验证
+
+以下测试是领域模型进入物理 Schema、Repository 和 adapter 实现的最低门，不以单元测试替代 kill-point、跨语言合同和真机验证。
+
+### 22.1 Installation 与 initialize
+
+- 生命周期矩阵覆盖 fresh、clear、reinstall、restore、manual rollback、schema/cipher migration 和 `activation_abort`，逐项断言 Installation ID、incarnation、bootstrap operation、LocalActor/default space、epoch和创建 build/time 的保持/轮换规则。
+- 构造同一 Installation、相同业务 ID、epoch 都为 `0` 但 incarnation 不同的 clear 前后数据，断言 request、task、projection、claim、registration和 current query均不碰撞或交叉连接。
+- Installation mirror 缺失、多行、与 bootstrap anchor 任一字段不一致、source 行试图覆盖、普通升级改写 build/time均阻止 Repository 开放；合法 mirror不存 epoch。
+- EmptyCandidateEvidence 覆盖每个 binding、错误 bootstrap digest、错误 candidate/root/Schema/cipher、baseline migration 非 0、seed digest不符和 capability重复消费；任一错误均不得写 marker。
+- seed cardinality覆盖 Installation/LocalActor/default space/AppPreferences/ProductCounter 的零行、多行、额外用户 Record/Plan/Instance、sync/outbox、非空 attachment root和非零 dataMutationCounter。
+- marker 前验证六类通知投影全零、恰一 dormant task及其 operation/candidate/full realm/revision/digest/reason/gate；task缺失、多余、已激活或 reason错误均拒绝 seal。
+- marker transaction 每个 statement、commit、FULL sync、close/read-back边界注入 kill/IO error；marker-only、task-only、owner-only、少/多 pair、跨 realm或非零初始 Run/Decision/Delivery/Inbox/checkpoint/receipt/watermark均不能成为可开放状态。
+- 只有 active control、typed marker/evidence、matching ActivationOpenReceipt、TD-004 active anchor、activation-recovery reopen 和完整 read-back 全部匹配，才可升级为普通 Repository 并返回 `Initialized`；marker/receipt 后普通启动不得补行。
+
+### 22.2 Notification realm 与六类投影
+
+- 六类投影、task/checkpoint/platform receipt/watermark 对 `installationIncarnationId` 做 non-null、EntityId grammar、唯一键、复合 FK、published pointer、latest-attempt grouping与 current-query测试；逐表注入只差 incarnation 的行并断言永不 current。
+- DatasetState 每 realm 恰一 owner；registered pair集合无缺失、额外或重复，version/digest不匹配时不得运行或 finalize。
+- Delivery 使用完整身份分组 latest attempt；同 realm 较新的 requested/rejected/missing/cancelled永久压过较早 accepted，跨 realm accepted从不参与比较。
+- Decision→Run和 ReconciliationState→published Run逐项验证 realm/revision/digest/transport/platform；跨 incarnation pointer、部分 building rows、未指向 sealed和 discarded run均不可见。
+- seal覆盖 0/1/多 Decision、重复候选、expected count不符、Decision projection v2 hash不符和 sealed后修改/删除拒绝；publish guard变化只可 discard并重排。
+- owner revision 上限分别覆盖可拒绝的业务/设置变化，以及不可拒绝的 OS 权限、时区/tzdb、真实 OS、transport enablement、managed evidence、capability/environment 与签名 registry 变化；后者必须保存新 runtime pair set/version/digest、删除集合外 current pair、创建或置 pending 精确全部 pair 并更新最新可得 baseline，断言不回绕且 exhausted 停止 platform write/current publish。
+- P0 local 的每条 Decision（包括 permission/channel/capacity/unsupported）都必须有非空 `lbr3:` platformRequestId；未来非本地 transport 只有在其 ADR 明确允许时才可为空。
+- `activation_abort` 前后逐字段比较 prior owner/revision/revisionState、pair set/state、run/Decision、Delivery、Inbox、task/checkpoint/platform receipt/watermark，全部必须保持，且 candidate dormant task 从未激活；成功 migration 则必须从 target-generation current facts 重建普通 device-local task，不得改写旧 generation task identity。
+- initialize/restore/manual rollback得到 revision-0 owner/精确 pending pair；migration/activation_abort保留 realm及合法投影；overlay在 marker后变化只推进一次 owner revision并全 pair fan-out，不增加 epoch。
+- Swift/Kotlin/TypeScript黄金向量覆盖 lbr3 request identity v3、payload v3、ActionInbox identity v3、schedule/privacy/input fingerprint v2和 Decision projection v2；覆盖 counter边界、null字段、非法 EntityId/recipientSlot和非 ASCII拒绝。字节算法仍以 TD-006/TD-009为唯一权威。
+- platform envelope测试确保每个调用/返回回显 exact realm；返回前发生 clear/restore/reinstall时结果只保留为 non-current技术事实。legacy/invalid artifact不伪造 identity、不返回内容且只能清理。
+
+### 22.3 ActionInbox 与远程推送
+
+- response覆盖 incarnation缺失/非法/不匹配、epoch缺失/非法/旧/future、lbr1/lbr2、request/payload/category/action合同不匹配；均不得创建 Inbox、导航或 mutation。
+- targetless/stale/business-noop矩阵固定为：realm不匹配或 current row缺失是 targetless；same-realm request identity变化才写 `stale_noop`；identity current但失权/终态/动作撤权才写 `business_noop`。
+- claim测试完整 realm CAS、并发 processor、进程 crash、其他 session回收、token错误、attempt上限、Lease B暂不可得和 commit前 realm/generation切换；任何失败不得留下半个业务 mutation或错误消费 Inbox。
+- NavigationIntent覆盖锁屏等待、解锁后 fresh Lease B、router接受后崩溃重放和旧 realm；不得持久化/复用解析目标。
+- NotificationDeviceRegistration覆盖每 device/pair最多一项 active、same-realm token rotation、expected serverVersion CAS、restore epoch轮换、clear incarnation轮换、reinstall新 Device、session/proof缺失和注册/回执迟到。
+- tampered/stale remote registration、push、provider receipt和 response不得进入 current Delivery/Inbox；服务端尚未知新 realm时旧 push即使展示，动作仍 targetless。local/remote同 ReminderInstance但 Delivery/request identity不能碰撞。
+
+### 22.4 DeviceStateOverlay 与 device-local async fence
+
+- AppPreferences逐字段恢复矩阵证明 portable user preference可恢复，而 source app-lock、locale/timezone、权限、session/token、BYOK、telemetry/legal consent、运行时间和build版本不能整行覆盖 receiving值。
+- DeviceStateOverlay缺任一必需 pair baseline、包含 platform/request ID、source提供 capability、错误真实 OS pair、重复 pair、active/retiring派生错误时阻止 marker；dataset replacement本身不推进 environment generation。
+- ProductCounter覆盖 fresh/clear/reinstall的 `incarnationStartedAt` 与计数重置、restore/manual/migration保持 receiving incarnation时间、restore/import不增加创建计数、删除不减少计数。
+- 对 DatasetBinding analyze/bind/detach、SyncDispatchAttempt、incoming sync page/cursor、AttachmentTransfer、search/today/thumbnail、attachment/file GC、backup/upload/restore、export/share cleanup分别在 claim后注入 clear、reinstall、restore和 migration；旧 callback不得写新 dataset、删除 current bytes、发布投影或重绑 task。另测 `activation_abort`：gate期间旧 lease不能提交，prior generation重新锚定并开放后，same-incarnation/generation普通 task保留且必须重新 claim；只有 aborted maintenance operation自身的 operation-scoped结果失效。
+- 每类 async handler逐一移除 Installation/incarnation、generation、claim token、适用 maintenance operation scope或子域 guard，合同测试必须失败；只匹配 task ID、业务 ID、epoch或时间不能通过。
+- SyncMutation业务幂等 identity在 restore后保持；旧 sender claim失效后 current realm可创建新 attempt并复用同 clientMutationId。membership tenure、binding/snapshot generation不匹配时即使 realm current也不得发送或确认。
+- SyncCursor 只有 Account、Device、Space、membership、DatasetBinding 与 snapshot generation 全部验证后才可把 source 进度映射为 receiving-realm row；任一不匹配都丢弃该进度并要求服务端 snapshot，不得猜测续传。
+- AttachmentTransfer在 attachment revision/content hash、realm/generation、claim token任一变化时不得 promote/delete；current facts可新建 transfer，旧 row identity不可修改。
+- native environment dirty signal只触发 current realm重新读取和一次 owner失效，不直接调平台、读内容或提交状态。
+
+### 22.5 迁移与降级
+
+- `projection_reset` fixture覆盖六类旧投影分别缺 incarnation、旧 Inbox处于每种状态、旧 published pointer/水位/fingerprint和 lbr1/lbr2平台项；断言不回填、不执行、不 current，并只从 current facts重建 owner/pair/task。
+- quarantine若启用，验证其永久 `non_current/terminal_noop`、无内容、不可变，且 current unique/FK/query和 processor均无法访问。
+- migration不推进 epoch、不轮换 incarnation；不支持 realm-aware schema的旧二进制被版本门拒绝，未知 future合同只能只读/安全清理。
+- portable round-trip确认 Record、ReminderPlan/Instance、LocalActor、SyncMutation业务 identity不含 installation incarnation；六类通知投影、DeviceStateOverlay、binding/claim/transfer执行态和 remote registration不进入 portable backup。
+
+## 23. 变更记录
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.22 | 2026-07-26 | 以 TD-004 Installation incarnation 统一初始化、通知六投影、远程注册和全部 device-local async 围栏，补齐 EmptyCandidateEvidence、字段级 DeviceStateOverlay、projection reset 与合同测试。 |
 | v1.21 | 2026-07-26 | 补齐恢复时 dormant coordinator 与 owner/全 pair 原子初始化，并明确 capability fingerprint 覆盖适用 channel/presentation。 |
 | v1.20 | 2026-07-26 | 统一 ActionInbox CAS 谓词与实体字段名为 processingState。 |
 | v1.19 | 2026-07-26 | 增加 NotificationDatasetState 统一 revision/pair fan-out，修复隐私比较候选循环，固定 ActionInbox claim 字段与 attempt 耗尽，并明确外部变化耗尽时的能力基线。 |
-| v1.18 | 2026-07-26 | 区分 dataset 替换后旧 inbox 不可见的 targetless no-op 与 current epoch 内可持久化的 stale_noop。 |
+| v1.18 | 2026-07-26 | 区分 dataset 替换后旧 inbox 不可见的 targetless no-op 与 same-realm 可持久化的 stale_noop。 |
 | v1.17 | 2026-07-26 | 为 NotificationDelivery 增加隐私无关 replace 指纹，使纯隐私放宽可跨崩溃确定比较。 |
 | v1.16 | 2026-07-26 | 固定 NotificationInputRevision 上限时业务写与已发生外部能力变化的不同 fail-closed 处理。 |
 | v1.15 | 2026-07-26 | 增加 ActionInbox stale_noop 与可恢复 claim 状态机，耐久化明确的隐私放宽刷新意图，并区分文案收紧与动作撤权。 |
 | v1.14 | 2026-07-26 | 统一提醒对账的唯一输入修订护栏，并明确 sealed SchedulingRun 仅允许 phase 进入发布或丢弃终态。 |
 | v1.13 | 2026-07-26 | 增加 NotificationInputRevision、完整 sealed SchedulingRun/Decision 发布、fresh action lease、有效呈现合同、确定性恢复优先级和 P1 ReminderDeliveryAggregate，并校正 ExactDecimal 值域。 |
-| v1.12 | 2026-07-26 | 增加 NotificationDatasetEpoch、ActionInbox、ReconciliationState、同 epoch Delivery 证据和激活门事务不变量，并固定恢复后的提醒状态规范化。 |
+| v1.12 | 2026-07-26 | 增加 NotificationDatasetEpoch、ActionInbox、ReconciliationState、当时的 epoch-scoped Delivery 证据和激活门事务不变量，并固定恢复后的提醒状态规范化；v1.22 已扩展为三元 realm。 |
 | v1.11 | 2026-07-26 | 纳入 TD-007 历史时间解析证据，并统一 ReminderInstance 收件人范围状态、逐设备 NotificationDelivery 字段与平台证据语义；同步修正页首版本。 |
 | v1.10 | 2026-07-26 | 补齐库存意图/流水一对一约束、同步 generation 防复活机制、direct claim 边界和家庭物品创建事务。 |
 | v1.9 | 2026-07-26 | 以成对 transfer event 保持跨空间记录 ID，并补充 membership 授权代次与提醒实例暂停状态。 |
