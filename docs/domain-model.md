@@ -1,6 +1,6 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.17 · 更新日期：2026-07-26 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.18 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
@@ -581,7 +581,7 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 | `sourceType`、`sourceId` | `hidden` 或业务来源枚举、`EntityId?` | `hidden` 只是 payload 隐私哨兵，不是业务来源类型；解锁后由 reminderInstanceId 反查。 |
 | `spaceId` | `EntityId?` | P2 普通 payload 的可选不透明上下文；hidden 时必须为空，不能作为授权事实。 |
 | `receivedAt`、`processedAt` | `Instant`、`Instant?` | 不用设备时间决定幂等或跨设备顺序。 |
-| `processingState` | `pending \| processing \| applied \| business_noop \| stale_noop \| failed_retryable \| failed_terminal` | `business_noop` 用于 identity current 但来源已经终态/失权/过期；`stale_noop` 用于入箱后 epoch/request identity 改变的无目标终态；Lease A 已发现的 stale response 不入箱。 |
+| `processingState` | `pending \| processing \| applied \| business_noop \| stale_noop \| failed_retryable \| failed_terminal` | `business_noop` 用于 identity current 但来源已经终态/失权/过期；`stale_noop` 用于 inbox 仍在 current dataset/epoch、但同 epoch request identity 已改变的无目标终态。dataset epoch 已替换时旧 row 不进入 target，response 在 current inbox lookup 前永久 no-op。 |
 | `processingAttempt` | `LongCounter` | 初始为 `0`；每次 CAS claim 时 checked +1，不用时间决定最新处理者。 |
 | `claimOwnerSessionId`、`claimToken` | `EntityId?` | 仅 processing 必填；绑定当前 App 进程会话与本次 claim，终态或退回 pending 时清空。 |
 | `claimedAt` | `Instant?` | 仅作诊断；claim 有效性使用进程会话与单调时钟，不以可回拨墙钟作正确性依据。 |
@@ -590,7 +590,7 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 
 只有 payload 先通过 bounded 语法、大小、ID grammar、版本、category/action allowlist 与 hidden/open-only 交叉字段校验，随后短 parser Lease A 再通过 active epoch/request/category registry fence，才能创建本实体；actionInboxId 按 TD-009 把 transport 与 categoryContractVersion 纳入版本敏感 hash。`sourceType=hidden` 当且仅当 `categoryContractId=open_only`；此时 category/action version 均为 1、`sourceId=null`、payload 无 spaceId，且 response `actionId` 只能是 open。任一非法组合在 Lease A 前拒绝。敏感通知必须使用该组合，非敏感通知也只有在有效呈现合同选择更严格 open-only 时可用。
 
-写入 inbox 后立即释放 Lease A，应用锁/用户等待期间不持有 DatasetReadLease。解锁后取得 fresh action/navigation Lease B，重新验证 inbox epoch、request identity、当前授权和来源；epoch/request identity 已变时以短事务落为终态 `stale_noop`，不得冒充 `business_noop`。mutating action 在 Lease B 下以单一领域事务处理，默认 open 在紧邻导航前也必须通过 Lease B。open 不持久化解析出的目标：router 接受以 actionInboxId 幂等标识、在 Lease B 下重新生成的 NavigationIntent 后把 inbox 置 applied；响应重放即使已有终态结果，也不能绕过 fresh fence 或复用旧目标缓存。
+写入 inbox 后立即释放 Lease A，应用锁/用户等待期间不持有 DatasetReadLease。解锁后取得 fresh action/navigation Lease B，先在 then-active Repository 查找同 epoch inbox：dataset 已替换、row 缺失或 epoch 不匹配时只产生无目标 stale 结果，不读取 previous dataset，也不在 target 伪造 row；同 epoch row 存在时才 claim 并重新验证 request identity、当前授权和来源。request identity 已变时以短事务落为终态 `stale_noop`，不得冒充 `business_noop`。mutating action 在 Lease B 下以单一领域事务处理，默认 open 在紧邻导航前也必须通过 Lease B。open 不持久化解析出的目标：router 接受以 actionInboxId 幂等标识、在 Lease B 下重新生成的 NavigationIntent 后把 inbox 置 applied；响应重放即使已有终态结果，也不能绕过 fresh fence 或复用旧目标缓存。
 
 processor 只有取得 Lease B 后，才能以 `(actionInboxId, expectedState, processingAttempt, claimOwnerSessionId, claimToken)` CAS 将 `pending/failed_retryable→processing`。完成必须在仍持有同 claim 与 Lease B 时迁移为 `applied/business_noop/stale_noop/failed_retryable/failed_terminal`；业务 mutation、inbox 终态、输入修订和后续对账任务仍是一个事务。每个 App 进程拥有随机 session ID；启动时立即把其他 session 遗留的 processing claim 回收到 pending，同一 session 的单调时钟 watchdog 也可回收超时 claim。`failed_retryable` 只能由带退避的耐久任务重新入队；Repository 再次 active、App 启动/前台和成功解锁都必须幂等扫描 pending/到期 retryable。Lease B 暂不可得时不 claim，保持 pending 并保留耐久唤醒任务，因此崩溃、锁屏或数据集切换都不会永久卡住 inbox。
 
@@ -707,7 +707,7 @@ NotificationDelivery accepted、iOS pending、Android adapter registry、远程�
 
 #### DOM-074：通知动作租约分段
 
-parser Lease A 只覆盖预先完成 bounded syntax/allowlist/cross-field 校验后的 active epoch/request/category fence 与 inbox 写入，随后立即释放；人机解锁等待不持有租约。解锁后无法取得 Lease B 时保持 inbox pending 并 defer，不能误标 stale；取得 fresh action/navigation Lease B 后，若 epoch/request identity 已变化则以 `stale_noop` 终结且不得解析目标，若 identity 仍 current 但授权、来源、动作或 category 语义已不允许，则在短事务消费 inbox 为 `business_noop`。mutating command 在 Lease B 下原子提交，默认 open 在紧邻导航前也必须 fresh fence。`validating` 等无法分类阶段不创建 inbox，并按 REM-062 defer。
+parser Lease A 只覆盖预先完成 bounded syntax/allowlist/cross-field 校验后的 active epoch/request/category fence 与 inbox 写入，随后立即释放；人机解锁等待不持有租约。解锁后无法取得 Lease B 时保持 inbox pending 并 defer，不能误标 stale。取得 fresh action/navigation Lease B 后，dataset/epoch 已改变或 current inbox 不存在时直接 targetless no-op，不访问 previous、也不在 target 建 row；同 epoch inbox 存在但 request identity 已变化时才以 `stale_noop` 终结且不得解析目标；identity 仍 current 但授权、来源、动作或 category 语义已不允许时，在短事务消费 inbox 为 `business_noop`。mutating command 在 Lease B 下原子提交，默认 open 在紧邻导航前也必须 fresh fence。`validating` 等无法分类阶段不创建 inbox，并按 REM-062 defer。
 
 #### DOM-075：通知对账发布原子性
 
@@ -1091,6 +1091,7 @@ StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.18 | 2026-07-26 | 区分 dataset 替换后旧 inbox 不可见的 targetless no-op 与 current epoch 内可持久化的 stale_noop。 |
 | v1.17 | 2026-07-26 | 为 NotificationDelivery 增加隐私无关 replace 指纹，使纯隐私放宽可跨崩溃确定比较。 |
 | v1.16 | 2026-07-26 | 固定 NotificationInputRevision 上限时业务写与已发生外部能力变化的不同 fail-closed 处理。 |
 | v1.15 | 2026-07-26 | 增加 ActionInbox stale_noop 与可恢复 claim 状态机，耐久化明确的隐私放宽刷新意图，并区分文案收紧与动作撤权。 |
