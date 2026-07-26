@@ -47,10 +47,10 @@ BackupCoordinator (application)
               ▼
 BackupContainerPort (audited native module)
   ├─ passphrase profile + Argon2id
-  ├─ random root/key-slot keys + HKDF
+  ├─ random BackupRootKey + HKDF-derived purpose keys
   ├─ header / AEAD manifest / secretstream
   ├─ exact-length parser + resource gates
-  └─ VerifiedBackupHandle / authenticated member streams
+  └─ VerifiedBackupHandle / one-shot second-pass session/evidence
               │
               ├─ TD-010 candidate importer
               └─ TD-005 attachment stream re-encryption
@@ -59,7 +59,7 @@ BackupContainerPort (audited native module)
 - TypeScript/JS 可以编排阶段、进度、provider 和受控 DTO，但不得取得 `PassphraseWrappingKey`、`BackupRootKey`、`SnapshotDataKey` 或派生 key raw bytes；
 - 口令从专用 UI 只经非日志 bridge 传入 native 一次，不进入 Redux、持久状态、analytics、crash breadcrumb 或通用错误对象；传入后立即清空 UI state。由于 JS string/系统剪贴板不能保证物理清零，文案只承诺最小驻留，不声称绝对擦除；
 - native 使用 libsodium guarded memory/平台等价能力，按阶段 `sodium_memzero`/释放可控副本；清零是 defense in depth，不替代最小生命周期；
-- TD-011 只有在私有密文 staging 的 header、manifest、全部 member、唯一 `TAG_FINAL` 和精确 EOF 完成首遍认证后，才向 TD-010 返回绑定该 staging 身份的 `VerifiedBackupHandle`；handle 可开启第二遍、逐 chunk 再认证的 portable DB/附件流，并提供 opaque `SnapshotDataKeyHandle`，但不暴露 raw key、任意文件系统路径或“解压到目录”；
+- TD-011 只有在私有密文 staging 的 header、manifest、全部 member、唯一 `TAG_FINAL` 和精确 EOF 完成首遍认证后，才向 TD-010 返回绑定该 staging 身份的 `VerifiedBackupHandle`；handle 只能开启一次 second-pass import session；portable DB/附件流和 `SnapshotDataKeyHandle` 都受该 session 生命周期约束，不能独立返回或复用；完整结束才产生一次消费的 `Pass2CompletionEvidence`，始终不暴露 raw key、任意文件系统路径或“解压到目录”；
 - `.lifebook` parser 和未加密导入/ZIP parser 是不同入口、不同 MIME/extension、不同端口和测试集，不能自动 fallback。
 
 ### 2. 口令 profile
@@ -104,7 +104,7 @@ random 32-byte BackupRootKey
 ```
 
 - root wrap nonce 每份备份随机 24 bytes；envelope 是 32-byte root key + 16-byte tag；
-- root envelope、manifest、key slot、payload plan 和 chunk AAD 的 domain label、字段顺序、宽度、endianness 与长度前缀只由 container-v1 规范拥有，ADR 不另定义第二套投影；其中 key-slot AAD 不允许“至少绑定”或实现自选字段；
+- root envelope、manifest、key slot、payload plan 和 chunk AAD 的完整 byte projection 只由 container-v1 规范拥有，ADR 不另定义第二套投影：root/manifest AAD 不额外 prepend label，其 256-byte header 中的 magic/version/suite 就是 domain discriminator；key-slot/chunk AAD 使用规范内的精确 label，member-plan JCS 使用精确 `domain` property；不允许“至少绑定”或实现自选字段；
 - writer 先生成所有 nonce、key、secretstream header 和 manifest framing，再构造 256-byte provisional header：只把 48-byte `rootKeyEnvelope` 区间置零，`rootWrapNonce`、reserved 和其他 bytes 保持最终值。root envelope AAD 是该完整 provisional header；包装后把 envelope 写回形成 final header；manifest AAD 是完整 final header，包括 envelope 与全零 reserved；
 - reader 先验证固定 header、文件上限和**已登记的精确 profile**，再运行 Argon2；不接受用户文件任意指定 memory/time/parallelism；
 - root envelope 未认证前，错误口令、envelope 篡改和相关截断统一映射为 `backup_unlock_failed`，用户文案不证明口令是否正确；
@@ -122,7 +122,7 @@ keySlotWrapKey   = HKDF-Expand(PRK, "life-book/backup/v1/key-slot-wrap-key", 32)
 ```
 
 - label 是精确 ASCII bytes，不含结尾 NUL；任何改变需要新 suite；
-- TD-010 每次备份随机生成的 256-bit `SnapshotDataKey` 只加密 portable SQLCipher DB；它用 `keySlotWrapKey` + 随机 XChaCha nonce 包装，slot 位于加密 manifest；
+- TD-010 每次备份请求 Key Manager 随机生成 operation-scoped 256-bit `SnapshotDataKey`，只加密 portable SQLCipher DB；它不是 HKDF 派生 key，以 opaque handle 交给 TD-011，再用 `keySlotWrapKey` + 随机 XChaCha nonce 包装，slot 位于加密 manifest；
 - key-slot AAD 按 container-v1 的精确二进制投影绑定 suite、container、slot、portable schema 和 portable member；任何字段、顺序或编码改变都需要新 suite；
 - attachment 原文只受外层 payload stream 保护，不携带原设备 `FileDataKey`/ARK envelope；恢复时 TD-005 生成接收设备新 key；
 - `PassphraseWrappingKey` 不加密 manifest/payload，`SnapshotDataKey` 不加密附件，三个 HKDF 子 key 不互换；
@@ -268,15 +268,17 @@ strict public-header/resource gate
 → pass 1: authenticate every payload chunk/member hash/length, unique FINAL and exact EOF
 → bind containerId + exact length + whole-container SHA-256 + private file identity
 → seal and return VerifiedBackupHandle
-→ pass 2 through that handle: re-authenticate exact staging while TD-010 builds disposable candidate
-→ verify pass-2 member hashes/FINAL/EOF/whole-container identity again; seal candidate evidence
+→ open one-shot pass-2 session: re-authenticate exact staging while TD-010 builds disposable candidate
+→ verify pass-2 member hashes/FINAL/EOF/whole-container identity and sink receipt
+→ issue Pass2CompletionEvidence bound to operation + handle + plan + candidate
 → preview + fresh auth
 → TD-010 atomic activation
 ```
 
 - `VerifiedBackupHandle` 不能在 pass 1 完成前构造，也不能引用可由调用方替换的 path；关闭/替换 staging、文件身份变化、任一 byte 改变或第二遍 identity 不一致都会使 handle 永久失效；
 - pass 1 不创建 candidate、不写业务数据、不重排通知或搜索；pass 2 只能写 TD-010/TD-005 管理的可丢弃 staging，完整结束前不产生 preview、activation 或外部副作用；
-- `BackupContainerPort` 不把整个载荷解密到目录；portable DB outer bytes 写入受控 SQLCipher staging 后只以 opaque SnapshotDataKey handle 打开，附件流直接由 TD-005 重新加密；
+- `Pass2CompletionEvidence` 是 process-local、不可伪造、一次消费的 native capability，精确绑定 operation ID、candidate generation、`VerifiedBackupHandle` 文件身份 tuple、manifest/member-plan digest、sink completion receipt 和第二遍 whole-container identity；缺失、不匹配、重复消费或取消都不能 seal candidate/生成 preview；
+- `BackupContainerPort` 不把整个载荷解密到目录；portable DB outer bytes 写入受控 SQLCipher staging 后只以 session-scoped opaque `SnapshotDataKeyHandle` 打开，附件流直接由 TD-005 重新加密；session terminal 后销毁该 handle；
 - container 认证不等于 portable SQLite 可信；TD-010 仍使用 defensive readonly reader、allowlist copy 和 fresh candidate；
 - 任何 payload/candidate 失败只清 staging/candidate，当前 active dataset 不变；
 - P0 不允许选择/跳过已认证必需成员、逐条合并、标题去重或把 `.lifebook` 当普通导入源；
@@ -295,29 +297,37 @@ strict public-header/resource gate
 
 日志、analytics、crash 和支持诊断只允许 operation ID、stage、稳定 code、格式/profile 版本、大小/耗时分桶和无内容计数；禁止口令、key、nonce/envelope bytes、路径、文件名、标题、EntityId、member/content hash、SQL row 或原始 parser 错误。
 
-- capture/project/member copy 只在 batch/chunk 边界响应取消；FINAL/close/target commit 按短不可中断临界段完成或标失败；
-- TD-010 final activation 不由普通返回手势、后台或本 ADR cancel 中断；
+- create capture/project/member stream、restore pass 1、restore pass 2 和 candidate validation 只在安全 batch/chunk/member boundary 响应取消；取消使 handle/session terminal，清理 staging/candidate，不产生 `Pass2CompletionEvidence`；
+- create 的 `FINAL + close/durability barrier` 与 `provider commit + close/reopen identity verify` 分别是短不可中断临界段；进入后返回实际 succeeded/failed，不把已经成功的文件报告为 canceled；
+- TD-010 activation 开始后不再接受普通取消或返回手势；迟到 cancel 不改变 old active/new active/integrity-blocked 的实际确定终态；
 - secretstream partial 不支持从任意位置 append。App 进程仍存活时可以在安全 chunk 边界暂停；进程被终止后，仅当加密 operation journal 和 opaque root/key handle 能安全恢复才续跑，否则删除 partial 并从头创建；
 - P0 默认不持久化可跨进程解封的 BackupRootKey，因此创建进程被杀后从头开始。未来跨进程 resume 需要 device-wrapped operation key、nonce/state 防重用、生命周期和新安全评审；
 - incomplete private/target file 永不重命名为成功备份，任何 failure/cancel 后 active 数据保持不变。
 
 ### 12. 版本与扩展
 
-四个版本独立：
+兼容性由独立 selector 明确组合，不存在一个万能 `formatVersion`：
 
-| 版本 | 拥有内容 |
+| Selector | 唯一职责 |
 | --- | --- |
-| `containerFormatVersion` | binary framing、header、KDF/root envelope/AEAD/secretstream suite。 |
-| `manifestSchemaVersion` | 认证 manifest 字段与跨字段 invariant。 |
-| `portableDataSchemaVersion` | portable SQLCipher 逻辑表、列和迁移 mapper。 |
-| `databaseSchemaVersion` | 接收设备 active/candidate 内部存储。 |
+| `headerVersion` | 公共头 layout、offset、宽度和 reserved 语义。 |
+| `containerFormatVersion` | member 排序、payload chunk/tag framing 与 EOF。 |
+| `suiteId` | HKDF、AEAD、nonce/tag、root/manifest/key-slot/plan/chunk AAD projection。 |
+| `passphraseProfileId` | Unicode/PRECIS mapping 与 normalization。 |
+| `kdfProfileId` | Argon2 算法、version、参数、单位和输出长度。 |
+| `manifestSchemaVersion` | 认证 JSON 字段、通用 extension envelope 和 Schema 内条件。 |
+| `portableDataSchemaVersion` | portable SQLCipher 逻辑表、列、meta 和迁移 mapper。 |
+| `portableCipherProfileId` | manifest `portableDatabase.cipherProfileId` 指向的 SQLCipher settings。 |
+| `scalarEncodingVersion` | TD-006 portable 标量 canonical encoding。 |
+| `databaseSchemaVersion` | 接收设备 active/candidate 内部存储；不是备份输入格式 selector。 |
 
-- v1 reader 只接受已登记 suite/KDF/passphrase profile，不做任意算法协商；
-- unknown container/suite/KDF/passphrase profile 要求升级；unknown critical feature/member 拒绝；
+- v1 reader 只接受已登记的 header/container/suite/passphrase/KDF/manifest/portable-data/portable-cipher/scalar selector 组合，不做任意算法协商；
+- 任一 unknown selector 要求升级；unknown critical feature/member 拒绝；
 - unknown non-critical member 仍必须按 plan 完整认证、计长和校验 hash，之后才可按长度丢弃；
+- `criticalFeatureBitmap` 和 manifest `requiredFeatures` 是 capability gate，不替代上述 selector；未知 critical/required 值拒绝；
 - v1 在整个 1.x 产品生命周期保持可读。算法升级采用 old-read/new-write，不原地重新解释 v1；
-- 改 AEAD、KDF profile、passphrase mapping、header framing、payload chunk/AAD 或 member framing 时新增 suite/container version 和 golden fixture；
-- manifest 添加 optional 字段可以提升 manifest version；portable schema migration 不提升 container version；
+- 改口令 mapping/Unicode 表只新增 `passphraseProfileId`；改 KDF 只新增 `kdfProfileId`；改 HKDF/AEAD/AAD projection 只新增 `suiteId`；改 header offset 只新增 `headerVersion`；改 member/chunk/EOF framing 只新增 `containerFormatVersion`；每项都带对应 golden fixture，不无关联地抬升所有 selector；
+- 仅使用 Schema 1 已预留的 bounded non-critical extension envelope 不提升 manifest version；新增根字段或改变 envelope 才新增 `manifestSchemaVersion`。portable schema/cipher/标量变化分别提升自己的 selector，不提升 container version；
 - writer 永远只写当前批准格式；停止旧 reader 必须遵守 DATA-051 公告和转换路径。
 
 ## Alternatives considered
@@ -436,6 +446,7 @@ SQLCipher、图片和 PDF 通常已压缩，收益不稳定；引入解压炸弹
 - create 的 capture/project/header/manifest/每 chunk/FINAL/fsync/private verify/provider copy/close/reopen 任一点 kill；
 - provider 权限撤销、短读/短写、不可 seek、内容替换、同名覆盖、空间耗尽和 target 无法重开；
 - pass 1 完成前无法构造/伪造 `VerifiedBackupHandle`；两遍之间或第二遍读取中 staging byte/descriptor/identity 变化会失败且不留下可激活 candidate；
+- pass 2 未完成、sink receipt 缺失、evidence 绑定不匹配/重复消费时不能 preview/activate；pass 2 cancel 和 activation late cancel 保持实际确定终态；
 - foreground chunk pause；进程 kill 后 partial 不续成成品而从头开始；
 - 干净安装与已有数据整体恢复，失败后当前 active 可打开且无混合 dataset；
 - 每个旧 container/manifest/portable fixture 恢复，再创建当前格式并在干净安装往返。
@@ -485,5 +496,6 @@ P0 没有官方口令恢复。以后若增加账号/托管 recipient、跨进程
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-26 | 以 container-v1/manifest Schema 收敛无额外 label 的 header AAD、domain-tagged plan、session-scoped SnapshotDataKey、`Pass2CompletionEvidence`、取消边界和独立兼容 selector。 |
 | 2026-07-26 | 固定 Unicode 17 OpaqueString 步骤、两阶段 header AAD、member 总序/扩展预算、parser 预算和先全量认证再二遍导入的 `VerifiedBackupHandle` 边界。 |
 | 2026-07-26 | 接受 OpaqueString + 固定 Argon2id profile、随机 BackupRootKey、HKDF 用途隔离、XChaCha manifest、单 secretstream payload、无路径/无压缩容器和独立版本/资源门。 |
