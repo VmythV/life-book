@@ -1,6 +1,6 @@
 # 生活有谱数据生命周期规范
 
-> 项目代号：`life-book` · 版本：v1.2 · 更新日期：2026-07-26 · 状态：数据生命周期基线
+> 项目代号：`life-book` · 版本：v1.3 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：本地数据、临时数据、附件，以及备份/恢复/导出/导入/删除/迁移的产品范围、用户可见成功/取消、保留和兼容承诺
 >
@@ -90,6 +90,8 @@
 - 用户内容相关设置，例如周起始日、通知内容模式和备份提示状态；
 - Schema、规则引擎和数据格式版本。
 
+这里的“完整”只指 portable 业务数据闭包，不等于复制源设备运行态。提醒部分保留 ReminderPlan、ReminderInstance 与业务 dedupe；六类通知设备投影、平台身份和对账运行态必须排除并由接收设备重建。
+
 ### DATA-021：不随用户数据集迁移的设备状态
 
 以下不从备份覆盖接收设备当前值：
@@ -98,13 +100,14 @@
 - `DeviceWrappingKey`、`DatabaseDataKey`、`AttachmentRootKey`、`DatasetControlKey` 及其设备本地 envelope；
 - 生物识别注册状态和系统凭据；
 - 操作系统通知、精确提醒、相册、相机和麦克风权限；
-- 系统通知平台调度 ID、渠道用户设置和已展示通知；
+- 系统通知平台 request/native ID、渠道用户设置、已展示通知、capability/environment/budget、明确呈现刷新意图，以及旧 reconcile task/checkpoint/receipt/watermark；
+- `NotificationDelivery`、`NotificationActionInbox`、`NotificationDatasetState`、`NotificationSchedulingDecision`、`NotificationSchedulingRun`、`NotificationReconciliationState` 六类通知设备投影；
 - P1 设备会话令牌、服务端刷新令牌和自带 API Key；
 - 遥测同意（按当前地区和政策重新确认）；
 - 智能数据说明确认（版本或地区变化时重新确认）；
 - 可重建搜索索引、缩略图、今天投影和普通缓存。
 
-恢复后使用接收设备当前或为 candidate 新生成的 DatabaseDataKey/AttachmentRootKey 重新保护内容，保持接收设备 DatasetControlKey，并重新检查所有权限。
+恢复后使用接收设备当前或为 candidate 新生成的 DatabaseDataKey/AttachmentRootKey 重新保护内容，保持接收设备 DatasetControlKey，并从接收设备的无内容 `DeviceStateOverlay` 与签名 build 合同重新建立权限、能力、registered notification pair 和版本基线；不得从 source/portable 猜测或补值。
 
 ### DATA-022：系统自动备份排除
 
@@ -122,7 +125,7 @@
 - 无账号、无网络也能创建和恢复；
 - 文件离开 App 私有目录后仍保持机密性和完整性；
 - 默认 `complete` 备份包含全部权威生活数据与所有 available 权威原附件；若预检发现 missing/corrupt，只有用户明确选择后才能生成 `recoverable_with_attachment_gaps`，仍保留其逻辑元数据但不得宣称“全部附件完整”；
-- 不包含设备主密钥、服务令牌、API Key、搜索索引或系统调度 ID；
+- 不包含设备主密钥、服务令牌、API Key、搜索索引、系统调度 ID、六类通知设备投影或旧通知任务/回执；
 - 能在兼容版本的另一台设备恢复；
 - 创建成功前完成结构和解密验证。
 
@@ -155,6 +158,8 @@ P0 只提供“完整加密备份”，不允许用户通过取消勾选敏感�
 - 可用附件；
 - 损坏/缺失附件的元数据与诊断标记；
 - 内容相关设置与版本。
+
+portable 范围明确保留 ReminderPlan、ReminderInstance 和业务幂等/dedupe，但排除 DATA-021 的六类通知设备投影、平台 ID、权限/capability/environment/channel/budget、force marker 与旧 reconcile task/checkpoint/receipt/watermark；不得通过“完整备份”把设备投影重新解释为必需内容。
 
 manifest 必须分别记录 `state=pending` 的 StockChangeIntent 数量，以及 state 不为 `acknowledged` 的 SyncMutation 数量（精确集合以 manifest Schema 注释和领域状态机为准），供恢复预览和后续同步安全判断；projectedQuantityCache 不必备份，恢复后从确认账本和 pending 意图重建。
 
@@ -214,11 +219,13 @@ P0 恢复用备份中的完整数据集**整体替换**当前生活数据，不�
 4. 认证并解析 canonical manifest，验证 Schema、required feature、成员计划和全文件精确长度；
 5. 第一遍认证全部成员、计长、哈希、唯一 FINAL 和 exact EOF，成功后才产生一次性的 `VerifiedBackupHandle`；
 6. 预检私有密文 staging、candidate、附件重加密和 previous generation 所需空间；
-7. 由该 handle 打开第二遍会话，把再次认证的字节写入可丢弃 candidate；只有完整结束才产生 `Pass2CompletionEvidence`；
-8. 防御性打开 portable 数据库，执行当前版本的迁移、实体/附件引用和全部业务不变量检查；
-9. 生成不含内容的恢复预览，并把它绑定到预期 active generation、mutation counter、当前/目标 notification epoch、candidate 与 completion evidence。
+7. 由该 handle 打开第二遍会话，把再次认证的 portable member/附件写入可丢弃 staging；只有完整成员计划、terminal sink receipt、唯一 FINAL 和 exact EOF 全部匹配才产生 `Pass2CompletionEvidence`；
+8. 在读取任何输入 Schema/业务行前以 TD-010 defensive/read-only 配置打开 portable 数据库，按已认证 `portableDataSchemaVersion` 选择签名 build 内的专用只读 mapper，用预编译 allowlist 逐字段复制到 fresh current-schema candidate；绝不在不可信输入上执行 migration SQL、trigger/view、backup API、`sqlcipher_export` 或写操作；
+9. 使用该 mapper 完成附件重加密、REM-012 提醒状态规范化、实体/引用/资源/全部业务不变量检查；未知必需字段、版本、枚举或未消费 portable 字段安全失败；
+10. 从接收设备 `DeviceStateOverlay`、当前 transport enablement/managed-evidence 摘要和签名 pair registry 派生精确 registered pair set/digest；在 candidate seal 前创建恰好一个绑定 operation/candidate/target epoch/revision 0/digest、activation gate 为空的 dormant notification coordinator task，且不创建六类通知设备投影；
+11. 生成不含内容的恢复预览，并把它绑定到预期 active generation/mutation counter、当前/目标 notification epoch、candidate/evidence、`notificationInitializationContractVersion`、registered pair-set digest 与 receiving overlay digest。
 
-激活前任一失败都不得以 candidate 覆盖当前权威逻辑数据集。预检期间业务写入仍可改变 active；若最终独占门内发现 generation 或 mutation counter 不等于预览值，candidate 不得激活，必须重新预检并让用户再次预览。
+激活前任一失败都不得以 candidate 覆盖当前权威逻辑数据集。预检期间业务写入仍可改变 active；若最终独占门内发现 generation、mutation counter 或 receiving overlay digest 不等于预览值，candidate 不得激活，必须重新预检并让用户再次预览。target epoch、pair-set digest 或 initialization contract 改变还会使 sealed dormant task 失配，必须重建 candidate，不能在激活临界段补丁修改。
 
 ### DATA-042：恢复预览
 
@@ -232,28 +239,34 @@ P0 恢复用备份中的完整数据集**整体替换**当前生活数据，不�
 - 数据集绑定、provenance 和待处理库存/同步状态的非内容摘要；
 - 当前数据将被整体替换；
 - 当前系统权限、设备密钥和登录会话不会从备份覆盖；
+- 接收设备当前提醒权限/渠道/transport 配置保持不变，恢复提交后会按当前 registered pair 重新检查；
 - 建议先为当前数据创建备份。
 
-最终确认只执行一次 fresh 应用锁或设备凭据认证，并把认证、明确覆盖确认、preview digest、预期 generation/counter/notification epoch、candidate 和 `Pass2CompletionEvidence` 绑定为同一短时操作；任何变化都使确认失效。
+最终确认只执行一次 fresh 应用锁或设备凭据认证，并把认证、明确覆盖确认、preview digest、预期 generation/counter/current+target notification epoch、candidate、`Pass2CompletionEvidence`、notification initialization contract、pair-set digest 和 receiving overlay digest 绑定为同一短时操作；任何变化都使确认失效。
 
 ### DATA-043：原子替换
 
 ```text
 VerifiedBackupHandle 第二遍认证并构建 candidate
 → 取得 Pass2CompletionEvidence
-→ 防御性验证并 seal candidate
-→ 生成绑定预期 active generation/counter/evidence 的 preview
+→ 防御性映射/验证，写入唯一 dormant notification coordinator task 并 seal candidate
+→ 生成绑定预期 active generation/counter/evidence/target epoch/init contract/pair digest/overlay 的 preview
 → 执行一次 fresh 认证和明确覆盖确认
-→ 取得独占激活门并重读、比较 generation/counter
+→ 取得独占激活门并重读、比较全部 preview guards
 → seal 旧 active 为 previous generation
-→ 写入 phase=validating 的认证 DatasetControlRecord
-→ 测试打开 candidate 并写入 activation marker
+→ 写入带 target notification epoch、phase=validating 的认证 DatasetControlRecord
+→ 测试打开 candidate
+→ 在一个 DELETE/FULL 事务写 activation marker、激活唯一 task、创建 revision-0 owner 和精确全部 pending pair state
+→ close/sync/read-back marker、task、owner 与 pair 全集；Run/Decision/Delivery/Inbox 必须仍为空
 → 写入 phase=active 的认证 DatasetControlRecord
-→ 重新打开 candidate 数据库与 Repository
-→ 提交后重建索引、缩略图和未来提醒
+→ 以 activation-recovery 模式重新打开 candidate/Repository，并复验初始化集合
+→ 提交 ActivationOpenReceipt 后才开放业务写入并返回 RestoreSucceeded
+→ 唤醒任务，提交后重建索引、缩略图和未来提醒
 ```
 
-不另复制一份回滚检查点：切换时封口的旧 active 就是只读 previous generation。只有 `phase=active` 已持久化、candidate 可重新打开且 Repository 已开放后才返回恢复成功；搜索、缩略图或通知收敛失败进入 degraded reconciliation，不回滚已提交的数据集。`validating` 且不存在 activation marker 时，启动恢复可以用更高 `controlSequence` 回到 previous；marker 已存在时必须完成 candidate 激活或进入 integrity-blocked，`active` 后也不得静默回退。任何时刻都不得让两个 generation 混合可写。
+不另复制一份回滚检查点：切换时封口的旧 active 就是只读 previous generation。marker 前 candidate 除唯一 dormant task 外没有六类通知设备投影；marker、task activation、NotificationDatasetState 和精确 pair states 要么在同一 SQLite 事务全部出现，要么全部不出现。只有 `phase=active` 已持久化、candidate/Repository 可重新打开、完整初始化集合复验通过且 ActivationOpenReceipt 已提交后才返回恢复成功；搜索、缩略图或通知收敛失败进入 degraded reconciliation，不回滚已提交的数据集。
+
+启动恢复的唯一分支为：`validating` 无 marker 时回 previous，dormant task 永不运行并随 candidate 回收；`validating` 有 marker 时只在 marker/task/owner/精确 pair 全匹配时完成同一个 target epoch，缺失/多余/不匹配直接 integrity-blocked，禁止补建或回退；`active` 但无 open receipt 时重复完整复验、打开 Repository 并写 receipt 后才开放；有匹配 receipt 后走普通启动，不能把之后合法推进的 revision 重置为 0。`active` 后不得静默回 previous，任何时刻都不得让两个 generation 混合可写。
 
 ### DATA-044：previous generation
 
@@ -270,25 +283,49 @@ VerifiedBackupHandle 第二遍认证并构建 candidate
 - 保持接收设备当前 Installation ID。
 - 不恢复源设备的 `DeviceWrappingKey`、`DatabaseDataKey`、`AttachmentRootKey` 或 `DatasetControlKey`；candidate 使用接收设备当前或新生成的 `DatabaseDataKey`/`AttachmentRootKey` 重新保护内容，并保持接收设备现有 `DatasetControlKey`。
 - 保持当前系统权限、应用锁认证能力、账号会话和遥测同意；不从备份打开权限。
+- `DeviceStateOverlay` 从接收设备为每个受支持 notification pair 固定 environment generation、含适用 channel 状态的 capability fingerprint、budget、transport enablement 和无内容 `hasManagedEvidence`；签名 build 提供 pair registry、tzdb/recurrence/adapter 和 notification initialization contract。二者派生 runtime active/retiring pair set/digest，source/portable 不得提供这些值，dataset replacement 本身不增加 environment generation。
 - 用户内容偏好可以恢复，但智能说明或法律同意版本过期时重新确认。
 - P1 已登录且备份属于其他账号时停止自动同步，先进入认领/冲突流程。
 - 隔离恢复出的本地实体 ID 在该副本内保持稳定，不等于获准上传。任何恢复出的 pending mutation 只有在同一 Account、同一 Space、同一 authorizationMembershipId（适用时）和同一 snapshotGeneration 全部验证后才能自动 push；generation 过期时先快照重建，再让用户逐项重放为新 mutation 或导出，不能直接发送旧队列。
 
 ### DATA-046：恢复后的提醒
 
-- 不恢复平台调度 ID 或“已展示”假设。
-- 激活必须在同一受认证控制记录转换中检查并加一 `notificationDatasetEpoch`；旧 epoch 的通知投递回调和用户 action 在任何清理之前就永久 no-op。
-- 提交后定向清理当前 App 已安排的旧通知，再从恢复出的计划强制重建；清理或重建失败进入 degraded reconciliation，不回滚已提交恢复。
-- 已过去且从未安排的提醒按 REM-032 不补发洪水。
-- 通知/精确提醒权限不具备时保存计划并显示等待权限。
-- 恢复完成页显示提醒对账水位和任何无法安排数量。
+- portable 保留 ReminderPlan、ReminderInstance 和业务 dedupe，但不恢复六类通知设备投影、平台 ID、旧 task/checkpoint/receipt/watermark、能力基线或“已展示”假设。
+- ReminderInstance 必须严格按下表第一条命中；来源失效只按 REM-021 穷举谓词判断，不能另造模糊分支：
+
+| 优先级 | source 条件 | target 状态 | 字段/投递结果 |
+| ---: | --- | --- | --- |
+| 1 | `acknowledged/snoozed/cancelled/expired` | 保持原终态 | 不重建平台请求。 |
+| 2 | 其余实例来源已失效 | `cancelled` | 离开 paused/failed 时清对应 `pauseReason/failureCode`。 |
+| 3 | `paused` 且原因仍成立 | `paused` | 保留 `pauseReason`，不重建。 |
+| 4 | `paused` 原因失效，目标未来/已过 | `planned` / `expired` | 清 `pauseReason`；过去不补发。 |
+| 5 | `scheduled/failed` 且来源有效，目标未来/已过 | `planned` / `planned` | 清 `failureCode`；过去只作 application-only 待查看/逾期，不进入 desired。 |
+| 6 | `planned` 且来源有效 | `planned` | 过去目标不进入 desired。 |
+
+- 激活从独占门内重读的 current control checked `+1` 得到 target `notificationDatasetEpoch`；validating 无 marker 回旧增量为 0，marker 后完成同一 target 不二次增加，schema/cipher migration 增量为 0。旧 epoch callback/action 在任何清理之前就永久 no-op。
+- marker transaction 激活唯一 coordinator task、创建一项 revision-0 active NotificationDatasetState 和 runtime digest 对应的精确全部 revision-0 pending ReconciliationState；字段和 receiving-device/build baseline 必须满足 TD-010，Run/Decision/Delivery/Inbox 初始为空。
+- Repository 开放后 coordinator 按 pair 分发：先定向清理旧/非法 epoch managed IDs，再只为未来计划重挂。若 overlay/pair 输入已改变，先以一次 owner revision `+1` fan-out 全 pair，再做平台写；单 pair 不能清 task 或全局 marker。
+- 每个 pair 完整成功才发布 succeeded 水位；平台/清理错误可以发布同 revision/digest 的完整 degraded Decision run，但 `scheduledThrough/lastSucceededAt` 为空且 coordinator 保留。权限/channel/容量等确定性 Decision 可在零平台调用的完整 succeeded run 中解释，不伪造 Delivery。
+- 通知/精确提醒权限不具备时计划仍保存；有 current Decision 时显示“等待通知权限/提醒渠道已关闭/等待补齐”，尚无 current run 或 degraded 时显示“正在重新检查”。恢复完成页只有 current owner/digest 下的 succeeded pair 才展示其水位；精确全部 pair succeeded 才显示“全部提醒方式已检查”，并展示不含标题的无法安排数量。
 
 ### DATA-047：取消和失败
 
 - 口令输入、第一遍认证、第二遍认证、candidate 构建/验证和预览阶段都可以在安全 chunk/batch 边界取消；删除未提交 candidate 和 operation-scoped key handle。
-- 一旦取得激活独占门，普通返回或迟到取消不再改变结果；该临界段只能收敛到旧 active、新 active 或 integrity-blocked，不能把已提交的新数据集报告为 canceled。
+- 一旦取得激活独占门，普通返回或迟到取消不再改变结果；界面进入不可取消的“正在切换数据”并等待启动/当前进程收敛。该临界段只能得到旧 active、新 active 或 integrity-blocked，不能把已提交的新数据集报告为 canceled。
 - KDF 前可区分格式/版本不支持；root envelope 认证前，错误口令、envelope 篡改和相关截断统一显示 `backup_unlock_failed`。只有 root 已认证后的损坏才可分类为文件损坏；空间不足和迁移失败使用各自用户文案，日志只含错误码和非内容诊断。
 - 激活前失败不以 candidate 覆盖当前权威逻辑数据集；若当前数据原本已损坏，不能把它描述为恢复导致。
+
+用户/API 终态矩阵固定为：
+
+| 耐久边界 | 启动/处理结果 | 用户状态 |
+| --- | --- | --- |
+| 未取得独占门，用户取消 | candidate/临时 key 清理，active 不变 | `RestoreCanceled`：“已取消，当前数据未更改”。 |
+| 独占门后、validating control 前失败 | old active 仍唯一有效 | `RestoreFailed`：“恢复失败，当前数据未更改”。 |
+| `phase=validating`、无 marker | startup 回 previous；dormant task 永不运行 | 启动恢复完成后报失败/中断，明确“当前数据未更改”。 |
+| marker 已提交、active control 或 open receipt 未完成 | 完整 read-back 后完成同一 target；不匹配则 integrity-blocked | 重启时只显示“正在完成恢复”，不提供取消或旧数据入口。 |
+| `phase=active` + matching open receipt + Repository open | 新 generation 是唯一事实源 | `RestoreSucceeded`；投影尚未完成时附“正在重建”。 |
+| 上一行成立但通知任一 pair degraded | 数据恢复成功，coordinator 重试 | `RestoreSucceeded + degraded_reconciliation`：“恢复成功，提醒正在重新检查”。 |
+| marker 后任一完整性谓词不匹配 | 不补建、不回 previous、不开放 Repository | `IntegrityBlocked`：显示数据保护页和受控诊断/恢复入口，绝不能冒充取消、普通失败或成功。 |
 
 ## 7. 备份兼容策略
 
@@ -590,10 +627,14 @@ P1/P2 服务端期限必须结合发行地区、运营主体、供应商和端�
 - 干净安装、有现有数据、应用锁开启、权限拒绝、旧格式和未来格式；
 - 损坏头、截断载荷、manifest 意外路径字段、symlink staging、重复成员、哈希不符和恶意超大尺寸声明；
 - 第一遍前不能取得 handle、两遍间替换/关闭/修改 staging 的 TOCTOU、第二遍没有 completion evidence 不能 preview/activate；
-- 迁移失败、`validating` 无 marker、marker 已写和 `active` 已写三段崩溃边界，以及迟到取消不改变确定终态；
-- Installation/LocalActor 语义、密钥重封装、索引和提醒重建；
-- 旧 `notificationDatasetEpoch` 回调/action 永久 no-op；通知、搜索、今天投影、索引或缩略图重建失败只产生提交后 degraded reconciliation；
-- 只有 Repository 可重新打开才报告成功；激活前每类失败都不以 candidate 覆盖 active。
+- defensive flags/limits/authorizer 任一缺失即拒绝；所有已发布 portable version 只经签名只读 mapper 进入 fresh candidate，输入 trigger/view/SQL/migration 永不执行；
+- candidate 排除六类通知设备投影与设备基线，保留 Plan/Instance/业务 dedupe；穷举 DATA-046 六条 first-match mapper、future/past、pause reason 和字段清理；seal 前恰有一个 gate 为空、绑定 target epoch/revision 0/pair digest 的 dormant coordinator task；
+- 在 validating control 写入、first-open、marker transaction 每个 statement/commit/FULL sync/close/read-back、active control、Repository reopen、ActivationOpenReceipt 的每个边界 kill/IO error；marker-only、task-only、owner-only、少/多 pair 不得成为 committed 可见状态；
+- `validating` 无 marker 只回 previous 且 task 不运行；有 marker 只在 marker/task/revision-0 owner/精确 pending pair 全匹配时完成 same target epoch，否则 integrity-blocked；`active` 无 receipt 重验后才开放，有 receipt 后不得把合法新 revision 重置为 0；
+- 对 DATA-047 每个终态验证 API code、用户文案、可取消性和可访问数据集一致；迟到取消永不把 new active 报 canceled，integrity-blocked 不展示旧/新内容；
+- Installation/LocalActor 语义、密钥重封装、receiving DeviceStateOverlay/pair digest、索引和提醒重建；overlay 在 marker 后改变必须全 pair revision `+1` 一次，不因 replacement 增加 environment generation；
+- 旧 `notificationDatasetEpoch` 回调/action 永久 no-op；任一 notification pair 失败只发布完整 degraded run、无成功水位并保留 coordinator；通知、搜索、今天投影、索引或缩略图重建失败只产生提交后 degraded reconciliation；
+- 只有 Repository 可重新打开、完整初始化 read-back 和 matching ActivationOpenReceipt 均成立才报告成功；激活前每类失败都不以 candidate 覆盖 active。
 
 ### DATA-132：删除与迁移测试
 
@@ -609,6 +650,7 @@ P1/P2 服务端期限必须结合发行地区、运营主体、供应商和端�
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.3 | 2026-07-26 | 排除六类通知设备投影，固定不可信 portable 的只读 mapper、dormant coordinator、marker 中 owner/全 pair 原子初始化、ActivationOpenReceipt、用户终态矩阵和 kill-point 验证。 |
 | v1.2 | 2026-07-26 | 对齐两遍认证、provider 目标身份、previous generation、通知 epoch、取消/成功边界及完整兼容选择器。 |
 | v1.1 | 2026-07-26 | 对齐库存意图/权威流水、同步恢复 generation、导入 ID 映射、服务端回收站时钟和无内容墓碑。 |
 | v1.0 | 2026-07-26 | 定义本地数据集、临时数据、版本化加密备份、原子恢复、未加密导出、P1 导入、删除清理、云端扩展和迁移兼容。 |
