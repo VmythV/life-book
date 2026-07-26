@@ -1,6 +1,6 @@
 # 生活有谱提醒与系统通知规范
 
-> 项目代号：`life-book` · 版本：v1.9 · 更新日期：2026-07-26 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.10 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：提醒计划、提醒实例、系统调度、通知动作、去重、权限、降级和可靠性边界
 >
@@ -127,7 +127,7 @@ scheduled ──┴──空间/订阅暂停──→ paused ──恢复且仍�
 | `rejected` | 平台拒绝，保存受控错误码。 |
 | `missing` | 本地期望存在，但平台可提供的 managed pending/登记证据中缺失。 |
 
-同一提醒实例可以有多个设备、每个设备可以有多个投递尝试；同一 `(ReminderInstance, installation/device slot, transport, platform, recipientSlot)` 同时至多一个 current `platformRequestId`，同一 request 可有多个 `attemptSequence`。投递必须记录 `notificationDatasetEpoch`、TD-006 LongCounter `attemptSequence`、`scheduleFingerprint`、`effectivePrivacyMode`、category/action/payload/request identity 合同快照、精度、`environmentGeneration`、`capabilityFingerprint`、adapter contract version 和证据类型；Android 的 registry 条目只能作为 `android_registry_only` 证据，不能单独证明 AlarmManager 接受。Delivery 不保存 title/body/raw payload 或原生任意错误消息。
+同一提醒实例可以有多个设备、每个设备可以有多个投递尝试；同一 `(ReminderInstance, installation/device slot, transport, platform, recipientSlot)` 同时至多一个 current `platformRequestId`，同一 request 可有多个 `attemptSequence`。投递必须记录 `notificationDatasetEpoch`、TD-006 LongCounter `attemptSequence`、`scheduleFingerprint`、TD-009 `privacyIndependentFingerprint`、`effectivePrivacyMode`、category/action/payload/request identity 合同快照、精度、`environmentGeneration`、`capabilityFingerprint`、adapter contract version 和证据类型；Android 的 registry 条目只能作为 `android_registry_only` 证据，不能单独证明 AlarmManager 接受。Delivery 不保存 title/body/raw payload 或原生任意错误消息。
 
 同一 `(reminderInstanceId, installation/device slot, transport, platform, recipientSlot, epoch, platformRequestId)` 身份的最新 attempt 必须存在，且其 `status=accepted`、fingerprint、precision、`environmentGeneration`、`capabilityFingerprint` 和 adapter contract 全部匹配当前有效输入，才是当前证据；最新 attempt 为 requested/rejected/missing/cancelled 时，较早 accepted 永不生效。旧 epoch 的 observed trigger/action 不得更新当前 Delivery 或 ReminderInstance；平台内部 ID 只能作为本机清理 metadata，不能取代项目生成的 `platformRequestId`。项目 `lbr2:` 身份必须显式包含 canonical `transport`，不能仅假定 recipientSlot 已自行命名空间化；不同 transport 的 request 与 action inbox 均不得碰撞。
 
@@ -714,6 +714,7 @@ P1 远程推送用于：
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.10 | 2026-07-26 | 将 TD-009 的 privacyIndependentFingerprint 纳入逐次 Delivery 证据，支持隐私放宽的跨崩溃确定比较。 |
 | v1.9 | 2026-07-26 | 增加 transport 隔离身份、ActionInbox 可恢复状态机、耐久隐私刷新意图、精确 dedup hash、revision 耗尽和完整 restore 初始化合同。 |
 | v1.8 | 2026-07-26 | 统一对账只使用 NotificationInputRevision 作为业务与设置输入的并发护栏，并明确 sealed run 的合法 phase 终态迁移。 |
 | v1.7 | 2026-07-26 | 增加 NotificationInputRevision、sealed SchedulingRun 和完整 Decision 发布，固定 restore 优先级、Lease B 分类、hidden/open-only 交叉合同、有效呈现合同与单条状态映射。 |
