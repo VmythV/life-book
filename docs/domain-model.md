@@ -1,6 +1,6 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.19 · 更新日期：2026-07-26 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.20 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
@@ -595,7 +595,7 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 
 写入 inbox 后立即释放 Lease A，应用锁/用户等待期间不持有 DatasetReadLease。解锁后取得 fresh action/navigation Lease B，先在 then-active Repository 查找同 epoch inbox：dataset 已替换、row 缺失或 epoch 不匹配时只产生无目标 stale 结果，不读取 previous dataset，也不在 target 伪造 row；同 epoch row 存在时才 claim 并重新验证 request identity、当前授权和来源。request identity 已变时以短事务落为终态 `stale_noop`，不得冒充 `business_noop`。mutating action 在 Lease B 下以单一领域事务处理，默认 open 在紧邻导航前也必须通过 Lease B。open 不持久化解析出的目标：router 接受以 actionInboxId 幂等标识、在 Lease B 下重新生成的 NavigationIntent 后把 inbox 置 applied；响应重放即使已有终态结果，也不能绕过 fresh fence 或复用旧目标缓存。
 
-processor 只有取得 Lease B 后，才能用谓词 `(actionInboxId, state=pending|failed_retryable, processingAttempt=expected, claimOwnerSessionId=null, claimToken=null, claimedAt=null)` CAS：把 attempt checked `+1` 并设置新 owner/token/claimedAt 后进入 processing。完成必须在仍持有同 claim 与 Lease B 时迁移为 `applied/business_noop/stale_noop/failed_retryable/failed_terminal`，并在同一事务把三个 claim 字段全部清空；业务 mutation、inbox 终态、输入修订和后续对账任务仍是一个事务。attempt 已达 LongCounter 上限时不得 claim，而是在 Lease B 下以 `failed_terminal + resultCode=action_processing_attempt_exhausted` 终结，claim 字段保持全空且不执行业务动作。
+processor 只有取得 Lease B 后，才能用谓词 `(actionInboxId, processingState=pending|failed_retryable, processingAttempt=expected, claimOwnerSessionId=null, claimToken=null, claimedAt=null)` CAS：把 attempt checked `+1` 并设置新 owner/token/claimedAt 后进入 processing。完成必须在仍持有同 claim 与 Lease B 时迁移为 `applied/business_noop/stale_noop/failed_retryable/failed_terminal`，并在同一事务把三个 claim 字段全部清空；业务 mutation、inbox 终态、输入修订和后续对账任务仍是一个事务。attempt 已达 LongCounter 上限时不得 claim，而是在 Lease B 下以 `failed_terminal + resultCode=action_processing_attempt_exhausted` 终结，claim 字段保持全空且不执行业务动作。
 
 每个 App 进程拥有随机 session ID；启动时立即把其他 session 遗留的 processing claim 回收到 pending，并清空三个 claim 字段，同一 session 的单调时钟 watchdog 也以 token-fenced CAS 做同样回收。`failed_retryable` 只能由带退避的耐久任务重新入队；Repository 再次 active、App 启动/前台和成功解锁都必须幂等扫描 pending/到期 retryable。Lease B 暂不可得时不 claim，保持 pending 并保留耐久唤醒任务，因此崩溃、锁屏或数据集切换都不会永久卡住 inbox。
 
@@ -1120,6 +1120,7 @@ StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.20 | 2026-07-26 | 统一 ActionInbox CAS 谓词与实体字段名为 processingState。 |
 | v1.19 | 2026-07-26 | 增加 NotificationDatasetState 统一 revision/pair fan-out，修复隐私比较候选循环，固定 ActionInbox claim 字段与 attempt 耗尽，并明确外部变化耗尽时的能力基线。 |
 | v1.18 | 2026-07-26 | 区分 dataset 替换后旧 inbox 不可见的 targetless no-op 与 current epoch 内可持久化的 stale_noop。 |
 | v1.17 | 2026-07-26 | 为 NotificationDelivery 增加隐私无关 replace 指纹，使纯隐私放宽可跨崩溃确定比较。 |
