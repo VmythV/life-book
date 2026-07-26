@@ -1,6 +1,6 @@
 # 生活有谱数据生命周期规范
 
-> 项目代号：`life-book` · 版本：v1.3 · 更新日期：2026-07-26 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.4 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：本地数据、临时数据、附件，以及备份/恢复/导出/导入/删除/迁移的产品范围、用户可见成功/取消、保留和兼容承诺
 >
@@ -306,7 +306,7 @@ VerifiedBackupHandle 第二遍认证并构建 candidate
 - marker transaction 激活唯一 coordinator task、创建一项 revision-0 active NotificationDatasetState 和 runtime digest 对应的精确全部 revision-0 pending ReconciliationState；字段和 receiving-device/build baseline 必须满足 TD-010，Run/Decision/Delivery/Inbox 初始为空。
 - Repository 开放后 coordinator 按 pair 分发：先定向清理旧/非法 epoch managed IDs，再只为未来计划重挂。若 overlay/pair 输入已改变，先以一次 owner revision `+1` fan-out 全 pair，再做平台写；单 pair 不能清 task 或全局 marker。
 - 每个 pair 完整成功才发布 succeeded 水位；平台/清理错误可以发布同 revision/digest 的完整 degraded Decision run，但 `scheduledThrough/lastSucceededAt` 为空且 coordinator 保留。权限/channel/容量等确定性 Decision 可在零平台调用的完整 succeeded run 中解释，不伪造 Delivery。
-- 通知/精确提醒权限不具备时计划仍保存；有 current Decision 时显示“等待通知权限/提醒渠道已关闭/等待补齐”，尚无 current run 或 degraded 时显示“正在重新检查”。恢复完成页只有 current owner/digest 下的 succeeded pair 才展示其水位；精确全部 pair succeeded 才显示“全部提醒方式已检查”，并展示不含标题的无法安排数量。
+- 通知/精确提醒权限不具备时计划仍保存；只要 succeeded/degraded pair 的 `publishedRunId` 指向完整 current revision/digest run，就按 current Decision 显示“等待通知权限/提醒渠道已关闭/等待补齐/失败”等单条状态并汇总不含标题的数量；没有 current published run 时才把对应结果显示为“正在重新检查”。degraded pair 仍不得展示成功水位，pair/全局检查状态保持“正在重新检查”；只有 current owner/digest 下的 succeeded pair 才展示其水位，精确全部 pair succeeded 才显示“全部提醒方式已检查”。
 
 ### DATA-047：取消和失败
 
@@ -650,6 +650,7 @@ P1/P2 服务端期限必须结合发行地区、运营主体、供应商和端�
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.4 | 2026-07-26 | 区分 degraded pair 的 current Decision 可解释状态与不可展示的成功水位。 |
 | v1.3 | 2026-07-26 | 排除六类通知设备投影，固定不可信 portable 的只读 mapper、dormant coordinator、marker 中 owner/全 pair 原子初始化、ActivationOpenReceipt、用户终态矩阵和 kill-point 验证。 |
 | v1.2 | 2026-07-26 | 对齐两遍认证、provider 目标身份、previous generation、通知 epoch、取消/成功边界及完整兼容选择器。 |
 | v1.1 | 2026-07-26 | 对齐库存意图/权威流水、同步恢复 generation、导入 ID 映射、服务端回收站时钟和无内容墓碑。 |
