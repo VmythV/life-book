@@ -406,6 +406,7 @@ active ⇄ archived
 | `inputMode` | `delta \| target` | purchase/consume/discard/lost 使用 delta；opening/adjust 使用 target。 |
 | `requestedDelta` | `ExactDecimal?` | delta 模式必填；符号由 kind 校验。 |
 | `targetQuantity` | `ExactDecimal?` | target 模式必填且非负；实际 delta 在权威过账时计算。 |
+| `baseLedgerSequence` | 非负整数 | 用户提交时看到的最新确认流水序号；opening 为 0，adjust 必须与接受时序号一致，其余类型用于冲突解释但可在非负约束内追加。 |
 | `occurredAt` | `Instant` | 用户声明的实际发生时间。 |
 | `recordedAt` | `Instant` | 用户提交时间；不决定账本顺序。 |
 | `note` | 文本? | 可选原因。 |
@@ -835,7 +836,7 @@ ReminderSubscription 只控制某成员设备是否投递，不改变 ReminderPl
 
 ### DOM-093：库存只有过账改变确认数量
 
-StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接受的事实。绑定空间只有服务端可以确定 ledgerSequence、quantityBefore、delta 和 quantityAfter；客户端不得先创建一条流水再由服务端重排或重算其不可变字段。
+StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接受的事实。绑定空间只有服务端可以确定 ledgerSequence、quantityBefore、delta 和 quantityAfter；客户端不得先创建一条流水再由服务端重排或重算其不可变字段。adjust 的 baseLedgerSequence 已变化时必须拒绝并让用户基于最新确认数量重新提交，不能把旧“调整为”静默应用到新账本。
 
 ### DOM-094：跨空间移动不保留记录 ID
 
@@ -881,6 +882,7 @@ StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.8 | 2026-07-26 | 为库存变化意图增加账本基线，确保并发 adjust 不会静默重解释。 |
 | v1.7 | 2026-07-26 | 分离库存变化意图与权威流水，定义服务端回收站时钟、成员重新加入 epoch、可恢复提醒暂停、个人低库存确认及新 ID 跨空间移动。 |
 | v1.6 | 2026-07-26 | 将账号/家庭收件人订阅映射到提醒实例，并明确同账号多设备共享逻辑实例、各自投递。 |
 | v1.5 | 2026-07-26 | 将未接受状态完全归属 Invitation，SpaceMembership 从接受邀请的原子事务起进入 active。 |
