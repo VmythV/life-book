@@ -411,7 +411,7 @@ active ⇄ archived
 | `recordedAt` | `Instant` | 用户提交时间；不决定账本顺序。 |
 | `note` | 文本? | 可选原因。 |
 | `correctionOfTransactionId` | `EntityId?` | adjust 可指出要修正的已过账流水。 |
-| `clientMutationId` | `EntityId` | 全局幂等键；同一意图重试不能产生第二条流水。 |
+| `clientMutationId` | `EntityId` | 全局唯一幂等键；同一意图重试不能产生第二条流水。 |
 | `state` | `pending \| accepted \| rejected \| cancelled` | accepted/rejected/cancelled 为终态；未绑定本地提交可在同一事务直接成为 accepted。 |
 | `resultTransactionId` | `EntityId?` | accepted 时必填并唯一；其余状态为空。 |
 | `rejectionCode` | 受控码? | rejected 时必填，不含用户内容。 |
@@ -422,7 +422,7 @@ active ⇄ archived
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
 | `recordId` | `EntityId` | 所属家庭物品。 |
-| `sourceIntentId` | `EntityId?` | 由用户操作产生时唯一关联意图；旧版导入可为空。 |
+| `sourceIntentId` | `EntityId?` | 由用户操作产生时唯一关联意图；非空时全局唯一，旧版导入可为空。 |
 | `kind` | `opening \| purchase \| consume \| adjust \| discard \| lost` | 受控类型。 |
 | `delta` | `ExactDecimal` | 权威应用值；purchase 为正，consume/discard/lost 为负，opening/adjust 由接受时目标与确认余额计算。 |
 | `quantityBefore` | `ExactDecimal` | 事务前数量。 |
@@ -448,6 +448,8 @@ active ⇄ archived
 #### DOM-052：流水不可变
 
 库存意图的输入字段和已过账流水均不得编辑；状态确认不是修改输入。输入错误使用新的 adjust 意图，接受后生成新流水，并可通过 `correctionOfId` 关联原流水。拒绝后的重试也必须创建新意图。家庭物品永久删除时才随聚合一起清除相关意图与流水。
+
+accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTransactionId` 与 `transaction.sourceIntentId` 双向一致；rejected/cancelled 意图不得对应流水。绑定空间的 pending→accepted/rejected 只能由经过 generation 与权限校验的服务端结果驱动，不得由客户端自行确认。
 
 ### 12.3 `LowStockEpisode`
 
@@ -631,7 +633,7 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 | `lastCompletedStep` | 受控枚举? | 崩溃后恢复认领，不代表业务数据已上传。 |
 | `bindingGeneration` | 正整数 | 每次认领/解绑尝试递增，丢弃迟到响应。 |
 
-认领只建立身份映射，不批量改写 Record 的 ID、createdByActorId 或历史 AuditEvent；LocalActor 通过 claimedByAccountId 解析为当前账号。选择“仅本机”时保持 unbound，已登录账号的云端个人空间不挂载为第二个本地默认个人空间。
+这里的“认领”仅指云端为空的 direct claim：它只建立身份映射，不批量改写 Record 的 ID、createdByActorId 或历史 AuditEvent；LocalActor 通过 claimedByAccountId 解析为当前账号。双方都有数据时属于 import + adopt，完成后本地原子采用远端 Space.id，候选对象按 DATA-071 保留或重映射 ID，不得套用 direct claim 的 ID 承诺。选择“仅本机”时保持 unbound，已登录账号的云端个人空间不挂载为第二个本地默认个人空间。
 
 ### 16.5 `SpaceMembership` 与 `Invitation`
 
@@ -672,6 +674,7 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 | `authorizationMembershipId` | `EntityId?` | 家庭空间写入时必填并绑定提交时的 membership tenure；重新加入不能复用旧授权。 |
 | `operation` | 受控命令 | 使用领域命令语义，不传任意 SQL/表 patch。 |
 | `baseServerVersion` | `ServerVersion` | 0 表示客户端认为实体尚不存在。 |
+| `snapshotGeneration` | 正整数? | bound 空间必填；新 mutation 必须匹配服务端当前可写 generation，既有幂等收据可直接返回原结果。 |
 | `payloadVersion` | 正整数 | 机器格式兼容版本。 |
 | `state` | `pending \| sending \| retry_wait \| acknowledged \| conflict \| rejected_forbidden \| rejected_moved \| rejected_version` | sending 崩溃后可安全回到 pending；rejected_moved 表示目标已离开原空间。 |
 | `attemptCount`、`nextAttemptAt` | 非负整数、`Instant?` | 受限指数退避。 |
@@ -679,6 +682,8 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 | `errorCode` | 受控码? | 不含用户内容。 |
 
 `SyncCursor` 每个设备、空间一条，保存最近完整应用的 `ServerSequence`、快照 generation 和更新时间。只有一页变化在本地事务中全部应用后才能推进；游标不是删除或备份时间。
+
+`SubmitStockChange` mutation 的 entityType/entityId 指向家庭物品聚合，payload 固定包含 intentId、recordId、kind、inputMode、requestedDelta 或 targetQuantity、baseLedgerSequence、occurredAt、recordedAt，并可含 note、correctionOfTransactionId；CreateHouseholdItem 在同一版本化 payload 中包含 openingIntentId 与 initialQuantity。实现不得发送由客户端预先计算的 quantityBefore/quantityAfter 作为权威输入。
 
 ### 16.7 `SyncConflict`
 
@@ -706,7 +711,7 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 | `retainUntil` | `Instant` | 同步安全期限；与 30 天业务回收站不同。 |
 | `reason` | `user_purge \| cascade \| account_deleted \| family_deleted` | 不含内容；跨空间移动不产生 Tombstone。 |
 
-墓碑只含上述删除控制字段，不保留标题、正文、详情、标签、附件、冲突快照或其他可恢复业务内容；因此业务内容清理完成与墓碑保留不矛盾。墓碑到期后仍离线的设备必须通过新快照 generation 重建，不能把旧实体当新增上传或基于旧 generation 写入。
+墓碑只含上述删除控制字段，不保留标题、正文、详情、标签、附件、冲突快照或其他可恢复业务内容，也不进入用户业务导出；因此业务内容清理完成与墓碑保留不矛盾。服务端只有先发布更高 snapshot generation 并把旧 generation 设为不可写，才可裁剪到期墓碑；之后仍离线的设备必须通过新 generation 快照重建，不能把旧实体当新增上传或基于旧 generation 写入。
 
 ### 16.9 `AttachmentTransfer` 与云备份元数据
 
@@ -769,7 +774,9 @@ ReminderPlan 属于家庭业务记录；`ReminderSubscription` 决定哪个 Acco
 
 | 操作 | 必须原子包含 |
 | --- | --- |
-| 创建记录 | `Record`、对应详情、初始标签关系；家庭物品另含期初流水和适用低库存周期。 |
+| 创建普通记录 | `Record`、对应详情和初始标签关系。 |
+| 未绑定创建家庭物品/服务端接受创建 | `Record`、详情、accepted opening 意图、opening 流水、确认/预估缓存、适用低库存周期和提醒任务。 |
+| 绑定空间本地创建家庭物品 | provisional Record、详情、pending opening 意图、SyncMutation 和 projectedQuantityCache；不创建确认流水、周期或通知。 |
 | 编辑记录 | 根版本、详情和受影响提醒对账任务。 |
 | 完成/跳过周期实例 | 实例物化、状态、操作记录和提醒取消任务。 |
 | 清单批量完成 | 所有目标项目、派生完成状态和提醒取消任务。 |
@@ -885,6 +892,7 @@ StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.10 | 2026-07-26 | 补齐库存意图/流水一对一约束、同步 generation 防复活机制、direct claim 边界和家庭物品创建事务。 |
 | v1.9 | 2026-07-26 | 以成对 transfer event 保持跨空间记录 ID，并补充 membership 授权代次与提醒实例暂停状态。 |
 | v1.8 | 2026-07-26 | 为库存变化意图增加账本基线，确保并发 adjust 不会静默重解释。 |
 | v1.7 | 2026-07-26 | 分离库存变化意图与权威流水，定义服务端回收站时钟、成员重新加入 epoch、可恢复提醒暂停和个人低库存确认；当时的跨空间 ID 方案已由 v1.9 替代。 |
