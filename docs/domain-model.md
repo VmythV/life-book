@@ -1,6 +1,6 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.4 · 更新日期：2026-07-26 · 状态：领域基线
+> 项目代号：`life-book` · 版本：v1.5 · 更新日期：2026-07-26 · 状态：领域基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
@@ -608,7 +608,7 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 | --- | --- | --- |
 | `spaceId`、`accountId` | `EntityId` | 组合唯一；服务端鉴权边界。 |
 | `role` | `owner \| member` | personal 固定 owner；家庭首期仅这两种。 |
-| `status` | `invited \| active \| leaving \| removing \| removed` | 只有 active 可以读取或写入空间。 |
+| `status` | `active \| leaving \| removing \| removed` | Invitation 独立表达未接受状态；只有 active 可以读取或写入空间。 |
 | `joinedAt`、`endedAt` | `Instant?` | 由服务端事务设置。 |
 | `invitedByAccountId` | `EntityId?` | 家庭邀请来源。 |
 | 公共元数据 | `EntityMeta` | 角色和状态变化产生服务端审计。 |
@@ -836,6 +836,7 @@ ReminderSubscription 只控制某成员设备是否投递，不改变 ReminderPl
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.5 | 2026-07-26 | 将未接受状态完全归属 Invitation，SpaceMembership 从接受邀请的原子事务起进入 active。 |
 | v1.4 | 2026-07-26 | 明确家庭空间所有者来源与删除计划，并增加所有权转移、成员提醒订阅、跨空间移动和服务端可信审计实体。 |
 | v1.3 | 2026-07-26 | 完整定义账号、认证身份、设备会话、数据集绑定、成员关系、同步元数据、冲突、墓碑、附件传输和云备份逻辑实体。 |
 | v1.2 | 2026-07-26 | 在规则段保存重复引擎版本，保证备份、迁移和同步可以重现历史候选。 |
