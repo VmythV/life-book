@@ -1,6 +1,6 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.6 · 更新日期：2026-07-26 · 状态：领域基线
+> 项目代号：`life-book` · 版本：v1.11 · 更新日期：2026-07-26 · 状态：领域基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
@@ -267,6 +267,11 @@ active ⇄ archived
 | `occurrenceKey` | 文本 | 基于记录、规则段和原计划本地值的稳定键。 |
 | `originalSchedule` | `ScheduleSpec` | 规则计算出的原始计划，永不因仅本次修改而改变。 |
 | `effectiveSchedule` | `ScheduleSpec` | 当前实际计划；默认等于原始计划。 |
+| `resolvedInstant` | `Instant?` | timed schedule 已解析时的绝对时刻；全天或尚未解析时为空。 |
+| `resolvedTimeZoneId` | `TimeZoneId?` | timed local schedule 实际解析使用的时区；不得用当下设备时区回填历史。 |
+| `resolvedUtcOffsetSeconds` | 整数? | 解析时采用的 UTC offset 秒数；与时区和 Instant 一起保留历史证据。 |
+| `resolvedTzdbVersion` | 文本? | 产生解析结果的固定 IANA tzdb 版本；有 resolvedTimeZoneId 时必填。 |
+| `resolution` | `exact \| gap_shifted_forward \| overlap_earlier \| overlap_later`? | timed local schedule 已解析时必填；记录 DST 消歧结果。 |
 | `state` | `pending \| completed \| skipped` | 逾期是根据当前时间派生，不持久化为终态。 |
 | `completedAt` | `Instant?` | 仅 completed。 |
 | `skippedAt` | `Instant?` | 仅 skipped。 |
@@ -281,6 +286,8 @@ active ⇄ archived
 #### DOM-011：历史不可改写
 
 已完成、已跳过、已取消或计划日在当前日期之前的实例不得因后续规则修改改变 `originalSchedule`、所属规则段或历史状态。
+
+发生项进入历史边界后，`resolvedInstant`、实际时区、offset、tzdb 版本和 resolution 也不可由新版时区数据改写。尚未发生且未处理的 future occurrence 可以按 TD-007 重算这些解析字段，但 occurrenceKey、originalSchedule 和规则段身份不变；修改前后必须触发提醒对账。
 
 ## 9. 清单聚合
 
@@ -504,7 +511,8 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 | `sourceOccurrenceKey` | 文本? | 与周期或日期发生项绑定。 |
 | `deduplicationKey` | 文本 | 同一逻辑提醒稳定唯一。 |
 | `scheduledFor` | `Instant` | 解析时区和偏移后的目标绝对时刻。 |
-| `state` | `planned \| scheduled \| paused \| acknowledged \| snoozed \| cancelled \| expired \| failed` | `delivered` 不作为可可靠确认的业务状态；paused 是可恢复的临时抑制。 |
+| `scheduleResolution` | 解析元数据? | 目标源自 timed local schedule 时保存实际 TimeZoneId、UTC offset 秒数、tzdb 版本和 `exact/gap_shifted_forward/overlap_earlier/overlap_later`；绝对 Instant 不需要。 |
+| `state` | `planned \| scheduled \| paused \| acknowledged \| snoozed \| cancelled \| expired \| failed` | 收件人范围内的逻辑状态，不是单台设备状态；`delivered` 不作为可可靠确认的业务状态；paused 是可恢复的临时抑制。 |
 | `pauseReason` | `space_deletion_scheduled \| subscription_paused`? | paused 时必填；恢复 future 实例时清空，已到期实例改为 expired。 |
 | `acknowledgementKind` | `opened \| done \| skipped \| noted \| shopping_added`? | 必须适合来源。 |
 | `snoozedFromId` | `EntityId?` | 稍后提醒链的上一实例。 |
@@ -513,11 +521,39 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 
 ### 14.3 `NotificationDelivery`
 
-表示一次把提醒实例提交到系统通知服务的尝试，包含本地 Installation/账号 Device、平台标识、调度标识、提交时间、结果、取消时间和非敏感错误码。一个账号订阅可在多个 Device 各有投递；它不声称通知已经被用户看到。
+表示一次把提醒实例提交到系统通知服务的尝试。一个账号订阅可在多个 Device 各有投递；它不声称通知已经被用户看到。
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `reminderInstanceId` | `EntityId` | 所属逻辑提醒实例。 |
+| `installationId` | `EntityId` | 本地设备槽位；P0 必填，不随业务备份迁移。 |
+| `deviceId` | `EntityId?` | P1 登录设备；同一账号多个 Device 分别投递。 |
+| `transport` | `local_notification \| remote_push` | 本地和远程尝试不能共用平台成功证据。 |
+| `platform` | `ios \| android` | 产生请求的平台；服务端远程路由仍指向目标设备平台。 |
+| `platformRequestId` | 文本 | 版本化稳定不透明 ID；不包含用户内容。 |
+| `attemptSequence` | 正整数 | 同一设备槽位和 request ID 内递增；判断最新 attempt，不用设备时间排序。 |
+| `scheduleFingerprint` | ContentHash | 覆盖目标、内容策略、payload/category、隐私和精度；不保存可见文案。 |
+| `status` | `requested \| accepted \| observed_trigger \| observed_action \| cancelled \| rejected \| missing` | 语义以 REM-013 为准；accepted 只表示平台 API 接受。 |
+| `evidence` | `ios_pending \| android_registry_only \| adapter_receipt \| none` | Android registry 不能单独证明 AlarmManager 仍有请求。 |
+| `requestedPrecision` | `exact \| approximate \| not_applicable` | Android 降级必须可观察；iOS 为 not_applicable。 |
+| `environmentGeneration` | 非负整数 | 调度使用的平台能力/环境代次；变化时旧证据失效。 |
+| `requestedAt`、`acceptedAt`、`observedAt`、`cancelledAt` | `Instant?` | 适用状态写入；不用它们决定跨设备先后。 |
+| `failureCode` | 受控错误? | 不含标题、正文、payload 或原生任意错误消息。 |
+| 公共元数据 | `EntityMeta` | — |
 
 #### DOM-070：提醒与记录独立
 
 提醒实例的 acknowledged/snoozed 状态不得自动给不支持完成的记录添加完成状态；通知动作必须先转换为对应领域命令，再由业务规则决定能否改变周期实例或清单。
+
+#### DOM-071：收件人状态与设备投递分离
+
+ReminderInstance 在一个 subscription/收件人范围内共享。P0 当前 installation 有未失效 accepted delivery 时可从 planned 聚合为 scheduled；P1 至少一个当前适用 Device 有未失效 accepted delivery 时可聚合为 scheduled。单台设备 rejected/missing、权限拒绝、渠道关闭或预算不足不得覆盖其他设备，也不得单独把共享实例改成 failed；每台设备的“已安排/近似/等待权限/失败”从自己的最新 NotificationDelivery 派生。
+
+只有收件人范围内全部当前适用设备均为不可重试失败、且没有 accepted 或待重试 attempt 时，ReminderInstance 才可进入 failed。权限未询问/拒绝、渠道关闭、容量不足或暂时没有活跃设备时保持 planned，并保留原因供界面解释。
+
+#### DOM-072：平台证据不等于送达
+
+NotificationDelivery accepted、iOS pending、Android adapter registry、远程推送供应商 receipt 和 observed trigger/action 都不能证明用户看到通知。Android 跳过重挂还必须同时具有当前 registry 匹配和相同 fingerprint、precision、environment generation 的最新 accepted attempt；较早 accepted 不能覆盖较新的 requested/rejected/missing/cancelled。
 
 ## 15. 设置与本地产品状态
 
@@ -892,6 +928,7 @@ StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.11 | 2026-07-26 | 纳入 TD-007 历史时间解析证据，并统一 ReminderInstance 收件人范围状态、逐设备 NotificationDelivery 字段与平台证据语义；同步修正页首版本。 |
 | v1.10 | 2026-07-26 | 补齐库存意图/流水一对一约束、同步 generation 防复活机制、direct claim 边界和家庭物品创建事务。 |
 | v1.9 | 2026-07-26 | 以成对 transfer event 保持跨空间记录 ID，并补充 membership 授权代次与提醒实例暂停状态。 |
 | v1.8 | 2026-07-26 | 为库存变化意图增加账本基线，确保并发 adjust 不会静默重解释。 |
