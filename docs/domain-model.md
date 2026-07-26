@@ -1,6 +1,6 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.20 · 更新日期：2026-07-26 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.21 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
@@ -683,7 +683,7 @@ NotificationDatasetState 的每个 registered pair 恰有一项 `(installationId
 | `lastAttemptedAt` | `Instant?` | succeeded/degraded 完成一次 guarded run 时设置；不代表成功。 |
 | `lastSucceededAt` | `Instant?` | 仅 succeeded 可作为当前“最近成功”；其他状态即使保留历史诊断值也不得展示为当前。 |
 | `environmentGeneration` | 非负整数 | 平台能力环境代次；不得代替 dataset epoch。 |
-| `capabilityFingerprint` | `ContentHash` | 覆盖权限、精度、预算和 adapter 能力，不含内容。 |
+| `capabilityFingerprint` | `ContentHash` | 覆盖权限、适用 channel/presentation、精度、预算和 adapter 能力，不含内容。 |
 | `inputFingerprint` | `ContentHash?` | succeeded/degraded 发布 run 的全部 guard 摘要；pending/running 为空。 |
 | `budget` | 非负整数 | 本轮固定平台预算。 |
 | `tzdbVersion`、`recurrenceEngineVersion`、`adapterContractVersion` | 版本 | 任一不匹配使水位失效并触发重算。 |
@@ -730,7 +730,7 @@ NotificationDelivery accepted、iOS pending、Android adapter registry、远程�
 - NotificationDatasetState、Delivery、ActionInbox、Decision、SchedulingRun、ReconciliationState、reconcile task/checkpoint、scheduled-through、request ID 和 payload 携带的 epoch 都只是 control 权威值的镜像；缺失、非法、旧或 future epoch 永久 no-op，不能更新当前 ReminderInstance/Delivery、打开目标或产生 mutation；
 - `environmentGeneration` 只表示权限、时间/时区、重启和 adapter 等平台环境变化，与 dataset epoch 不可互换；
 - committed restore/manual rollback checked `+1`；`validating` 无 marker 回 previous 保持原 epoch，marker 后完成 target 不再次递增，schema/cipher migration 保持 epoch；
-- restore/manual rollback 的 mapper 优先级固定为：① `acknowledged/snoozed/cancelled/expired` 业务终态保持；②其余实例的来源按 REM-021 已失效时转 `cancelled`；③ `paused` 原因仍成立时保持，否则 future 转 `planned`、past 转 `expired` 并清 pauseReason；④其余 `scheduled/failed` 在来源仍有效时 future/past 都转 `planned` 并清 failureCode，past 只派生 application-only 待查看且永不补发；⑤原 `planned` 且来源仍有效时保持 planned，past 永不重挂。mapper 排除全部通知设备投影和旧 task，并另建/激活 target-epoch force task；schema/cipher migration 不执行该规范化。
+- restore/manual rollback 的 mapper 优先级固定为：① `acknowledged/snoozed/cancelled/expired` 业务终态保持；②其余实例的来源按 REM-021 已失效时转 `cancelled`；③ `paused` 原因仍成立时保持，否则 future 转 `planned`、past 转 `expired` 并清 pauseReason；④其余 `scheduled/failed` 在来源仍有效时 future/past 都转 `planned` 并清 failureCode，past 只派生 application-only 待查看且永不补发；⑤原 `planned` 且来源仍有效时保持 planned，past 永不重挂。mapper 排除六类通知设备投影和旧 task；candidate 只预建一个绑定 target epoch/revision 0/pair-set digest、activation gate 为空的 dormant coordinator task，activation-marker transaction 再原子激活该 task、创建一项 revision-0 active NotificationDatasetState 和精确全部 revision-0 pending registered-pair ReconciliationState。marker 前不得提前创建这些 owner/pair 投影；schema/cipher migration 不执行该规范化或初始化。
 
 这里“来源失效”只按 REM-021 的穷举谓词判断；不得另造含义重叠的“不可操作”分支把同一输入写成 expired。若未来需要对仍有效但过久的 application-only 提醒自动过期，必须在 REM-032 新增按来源可测试的确定规则和迁移，而不能由 restore mapper 猜测。
 
@@ -1120,6 +1120,7 @@ StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.21 | 2026-07-26 | 补齐恢复时 dormant coordinator 与 owner/全 pair 原子初始化，并明确 capability fingerprint 覆盖适用 channel/presentation。 |
 | v1.20 | 2026-07-26 | 统一 ActionInbox CAS 谓词与实体字段名为 processingState。 |
 | v1.19 | 2026-07-26 | 增加 NotificationDatasetState 统一 revision/pair fan-out，修复隐私比较候选循环，固定 ActionInbox claim 字段与 attempt 耗尽，并明确外部变化耗尽时的能力基线。 |
 | v1.18 | 2026-07-26 | 区分 dataset 替换后旧 inbox 不可见的 targetless no-op 与 current epoch 内可持久化的 stale_noop。 |
