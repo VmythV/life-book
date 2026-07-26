@@ -150,7 +150,9 @@ P0 初始化时分别生成当前安装和本地作者身份：
 | `isPinned` | 布尔 | 是 | 默认 `false`。 |
 | `archivedAt` | `Instant` | 否 | 非空表示归档。 |
 | `trashedAt` | `Instant` | 否 | 非空表示进入回收站。 |
-| `purgeAfter` | `Instant` | 否 | 进入回收站时计算，默认 30 天。 |
+| `purgeAfter` | `Instant` | 否 | 本地数据集的有效清理期限；进入回收站时先按 30 个绝对 24 小时计算，绑定空间收到服务端确认后改用 `serverPurgeAfter`。 |
+| `serverTrashedAt` | `Instant` | 否 | 绑定空间由服务端确认进入回收站的时刻；未确认或非绑定空间为空。 |
+| `serverPurgeAfter` | `Instant` | 否 | 绑定空间的服务端权威清理期限；存在时必须等于 `serverTrashedAt + 30 个绝对 24 小时`。 |
 | `trashedFrom` | `active \| archived` | 否 | 用于恢复到删除前状态。 |
 | 公共元数据 | `EntityMeta` | 是 | — |
 
@@ -168,6 +170,8 @@ active ⇄ archived
 
 - `trashedAt != null` 时记录状态一律为 `trashed`，即使保留了 `archivedAt`。
 - `purgeAfter` 只有回收站记录可以存在。
+- 未绑定空间的有效清理期限为 `purgeAfter`；绑定空间在删除 mutation 未确认前不得永久清理，确认后的有效期限为 `serverPurgeAfter`，并将本地 `purgeAfter` 对齐到该值。
+- 恢复必须同时清除 `trashedAt`、`purgeAfter`、`serverTrashedAt` 和 `serverPurgeAfter`；迟到的旧删除确认因版本不匹配不得重新写回。
 - 永久删除后的业务实体不可恢复或复用 ID。
 - “完成”不是通用记录生命周期；它属于周期实例或清单实例。
 
@@ -385,39 +389,64 @@ active ⇄ archived
 | --- | --- | --- |
 | `recordId` | `EntityId` | 对应 `Record.type = household_item`。 |
 | `unit` | 文本 | 创建后修改需经过单位变更规则。 |
-| `currentQuantityCache` | `ExactDecimal` | 流水结果的事务内缓存，必须可重建。 |
+| `currentQuantityCache` | `ExactDecimal` | 已过账流水结果的事务内缓存，必须可重建；它是可触发业务规则的确认数量。 |
+| `projectedQuantityCache` | `ExactDecimal?` | 按本地待处理库存意图顺序计算的界面预估；无待处理意图时为空，不得触发共享低库存周期或通知。 |
 | `lowStockThreshold` | `ExactDecimal?` | 非负；为空表示不判断低库存。 |
 | `storageLocation` | 文本? | 用户可见位置。 |
 | `primaryAttachmentId` | `EntityId?` | 必须是该记录的可用图片附件。 |
 
-### 12.2 `StockTransaction`
+### 12.2 `StockChangeIntent` 与 `StockTransaction`
+
+`StockChangeIntent` 保存用户提交的不可变库存输入；它不是库存流水，只有服务端或未绑定本地账本接受后才产生 `StockTransaction`：
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
 | `recordId` | `EntityId` | 所属家庭物品。 |
 | `kind` | `opening \| purchase \| consume \| adjust \| discard \| lost` | 受控类型。 |
-| `delta` | `ExactDecimal` | purchase 为正；consume/discard/lost 为负；opening/adjust 可按目标计算。 |
+| `inputMode` | `delta \| target` | purchase/consume/discard/lost 使用 delta；opening/adjust 使用 target。 |
+| `requestedDelta` | `ExactDecimal?` | delta 模式必填；符号由 kind 校验。 |
+| `targetQuantity` | `ExactDecimal?` | target 模式必填且非负；实际 delta 在权威过账时计算。 |
+| `occurredAt` | `Instant` | 用户声明的实际发生时间。 |
+| `recordedAt` | `Instant` | 用户提交时间；不决定账本顺序。 |
+| `note` | 文本? | 可选原因。 |
+| `correctionOfTransactionId` | `EntityId?` | adjust 可指出要修正的已过账流水。 |
+| `clientMutationId` | `EntityId` | 全局幂等键；同一意图重试不能产生第二条流水。 |
+| `state` | `pending \| accepted \| rejected \| cancelled` | accepted/rejected/cancelled 为终态；未绑定本地提交可在同一事务直接成为 accepted。 |
+| `resultTransactionId` | `EntityId?` | accepted 时必填并唯一；其余状态为空。 |
+| `rejectionCode` | 受控码? | rejected 时必填，不含用户内容。 |
+| 公共元数据 | `EntityMeta` | 输入字段创建后不可修改；重新提交必须创建新意图。 |
+
+`StockTransaction` 是已接受、可展示的权威账本流水：
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `recordId` | `EntityId` | 所属家庭物品。 |
+| `sourceIntentId` | `EntityId?` | 由用户操作产生时唯一关联意图；旧版导入可为空。 |
+| `kind` | `opening \| purchase \| consume \| adjust \| discard \| lost` | 受控类型。 |
+| `delta` | `ExactDecimal` | 权威应用值；purchase 为正，consume/discard/lost 为负，opening/adjust 由接受时目标与确认余额计算。 |
 | `quantityBefore` | `ExactDecimal` | 事务前数量。 |
 | `quantityAfter` | `ExactDecimal` | 事务后数量，必须等于 before + delta。 |
 | `occurredAt` | `Instant` | 用户声明的实际发生时间。 |
-| `recordedAt` | `Instant` | 写入时间；晚补流水时与 occurredAt 不同。 |
+| `recordedAt` | `Instant` | 原意图提交时间；晚补流水时与 occurredAt 不同。 |
+| `postedAt` | `Instant` | 权威账本接受时间。 |
 | `ledgerSequence` | 正整数 | 单物品内严格递增，决定余额累计顺序；晚补流水仍追加，不回写后续历史。 |
 | `note` | 文本? | 可选原因。 |
 | `correctionOfId` | `EntityId?` | 调整用于修正哪条流水，可为空。 |
-| `idempotencyKey` | 不透明值? | 通知动作、导入或同步重试去重。 |
+| `postingAuthority` | `local \| server` | 未绑定数据集由本地账本过账；绑定空间只允许服务端过账。 |
+| `serverSequence` | `ServerSequence?` | 服务端接受或云端空数据认领确认后填充；不是单物品 ledgerSequence。 |
 | 公共元数据 | `EntityMeta` | 流水创建后业务字段不可变。 |
 
 #### DOM-050：库存权威值
 
-有效库存流水按 `ledgerSequence` 累计是当前数量的权威来源；`currentQuantityCache` 只为查询性能存在，并必须与新增流水在同一事务更新。发现不一致时停止普通写入并通过重算/诊断修复，不能信任缓存覆盖历史。`occurredAt` 用于展示实际发生时间，不改变余额累计顺序。
+已过账 `StockTransaction` 按 `ledgerSequence` 累计是确认数量的权威来源；pending/rejected/cancelled `StockChangeIntent` 不进入账本。`currentQuantityCache` 只为查询性能存在，并必须与新增流水在同一权威事务更新。`projectedQuantityCache` 可以按本设备 pending 意图预估，但必须显示“待同步”，不能替代确认数量。发现确认缓存不一致时停止普通写入并通过重算/诊断修复，不能信任缓存覆盖历史。`occurredAt` 用于展示实际发生时间，不改变余额累计顺序。
 
 #### DOM-051：库存非负
 
-当前数量不得小于 0。会导致负数的使用、报废或丢失操作必须阻止提交，并建议用户使用“调整为实际数量”。导入历史数据如包含负值，必须在预览中要求解决。
+确认数量不得小于 0。未绑定数据集在本地过账前校验；绑定空间由服务端针对最新 ledgerSequence 校验。离线意图可以暂存，但若接受后会为负，服务端必须拒绝并生成可处理冲突，客户端不能静默改小数量。导入历史数据如包含负值，必须在预览中要求解决。
 
 #### DOM-052：流水不可变
 
-库存流水创建后不得编辑或单独删除。输入错误使用新的 `adjust` 流水修正，并可通过 `correctionOfId` 关联原流水。家庭物品永久删除时才随聚合一起清除流水。
+库存意图的输入字段和已过账流水均不得编辑；状态确认不是修改输入。输入错误使用新的 adjust 意图，接受后生成新流水，并可通过 `correctionOfId` 关联原流水。拒绝后的重试也必须创建新意图。家庭物品永久删除时才随聚合一起清除相关意图与流水。
 
 ### 12.3 `LowStockEpisode`
 
@@ -428,14 +457,15 @@ active ⇄ archived
 | `thresholdSnapshot` | `ExactDecimal` | 进入时阈值，便于解释历史。 |
 | `quantitySnapshot` | `ExactDecimal` | 进入时数量。 |
 | `notifiedAt` | `Instant?` | 首次主动提醒成功交给系统的时间。 |
-| `acknowledgedAt` | `Instant?` | 用户知道了或采取采购动作。 |
+| `handledAt` | `Instant?` | 通过加入适用共享采购清单等共享动作结束本周期的主动催促；“知道了”不写此字段。 |
+| `handledReason` | `shopping_item_added`? | handledAt 非空时必填。 |
 | `resolvedAt` | `Instant?` | 数量恢复、阈值变化或记录退出活跃跟踪时设置。 |
 | `resolutionReason` | `stock_recovered \| threshold_changed \| threshold_removed \| archived \| trashed`? | 解决时必填，解释为何结束本周期。 |
 | 公共元数据 | `EntityMeta` | 历史周期不可合并。 |
 
 #### DOM-053：低库存判定
 
-当且仅当 `lowStockThreshold != null` 且 `currentQuantity <= lowStockThreshold` 时处于低库存。连续不足只对应一个未解决周期；恢复后再次不足必须创建新周期。
+当且仅当 `lowStockThreshold != null` 且确认的 `currentQuantityCache <= lowStockThreshold` 时处于低库存。连续不足只对应一个未解决周期；恢复后再次不足必须创建新周期。pending 库存意图只能产生带“待同步”的界面预估，不创建或解决周期、不触发通知；意图过账后再按确认前后值判断。个人“知道了”由对应 ReminderInstance/Subscription 表达，不改变共享 LowStockEpisode；`handledAt` 只表示所有成员可观察的共享处理动作。
 
 ## 13. 采购清单关联
 
@@ -607,14 +637,15 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
-| `spaceId`、`accountId` | `EntityId` | 组合唯一；服务端鉴权边界。 |
+| `spaceId`、`accountId` | `EntityId` | 服务端鉴权边界；同一账号可有多段历史 tenure，但最多一条未终结 membership。 |
+| `membershipEpoch` | 正整数 | 同一 `(spaceId, accountId)` 每次重新加入严格递增；与二者共同唯一。 |
 | `role` | `owner \| member` | personal 固定 owner；家庭首期仅这两种。 |
-| `status` | `active \| leaving \| removing \| removed` | Invitation 独立表达未接受状态；只有 active 可以读取或写入空间。 |
+| `status` | `active \| leaving \| removing \| removed` | Invitation 独立表达未接受状态；只有 active 可以读取或写入空间；removed 终态不复活。 |
 | `joinedAt`、`endedAt` | `Instant?` | 由服务端事务设置。 |
 | `invitedByAccountId` | `EntityId?` | 家庭邀请来源。 |
 | 公共元数据 | `EntityMeta` | 角色和状态变化产生服务端审计。 |
 
-`Invitation` 包含家庭空间、邀请者、目标角色、tokenHash、状态 `draft | active | accepted | revoked | expired`、过期时刻、接受账号、接受/撤销时间和服务端版本。明文 token 只在创建时返回，不保存、不写日志；同一邀请最多接受一次。
+`Invitation` 包含家庭空间、邀请者、目标角色、tokenHash、状态 `draft | active | accepted | revoked | expired`、过期时刻、接受账号、接受/撤销时间和服务端版本。明文 token 只在创建时返回，不保存、不写日志；同一邀请最多接受一次。重新邀请已离开的账号会创建新 Invitation，接受时创建新 membership ID 和更大的 membershipEpoch，不修改旧 membership。
 
 ### 16.6 同步元数据
 
@@ -670,9 +701,9 @@ P0 只必须记录高风险数据操作和必要诊断；P2 家庭操作记录�
 | `serverVersion`、`serverSequence` | 版本 | 使所有设备观察删除。 |
 | `purgedAt` | `Instant` | 服务端接受永久删除时间。 |
 | `retainUntil` | `Instant` | 同步安全期限；与 30 天业务回收站不同。 |
-| `reason` | `user_purge \| cascade \| account_deleted \| family_deleted` | 不含内容。 |
+| `reason` | `user_purge \| cascade \| space_move \| account_deleted \| family_deleted` | 不含内容。 |
 
-墓碑到期后仍离线的设备必须通过新快照 generation 重建，不能把旧实体当新增上传。
+墓碑只含上述删除控制字段，不保留标题、正文、详情、标签、附件、冲突快照或其他可恢复业务内容；因此业务内容清理完成与墓碑保留不矛盾。墓碑到期后仍离线的设备必须通过新快照 generation 重建，不能把旧实体当新增上传或基于旧 generation 写入。
 
 ### 16.9 `AttachmentTransfer` 与云备份元数据
 
@@ -706,10 +737,11 @@ ReminderPlan 属于家庭业务记录；`ReminderSubscription` 决定哪个 Acco
 | `mode` | `all_active_devices \| selected_devices \| off` | 默认由家庭规范决定。 |
 | `selectedDeviceIds` | ID 集合 | selected_devices 时至少一个，且都属于 recipient。 |
 | `origin` | `creator_default \| user_opt_in \| assignment` | 解释订阅来源，不作为权限。 |
-| `status` | `active \| cancelled` | 成员离开、计划失效或空间删除时取消。 |
+| `status` | `active \| paused \| cancelled` | paused 可恢复且必须有原因；成员离开、计划永久失效或空间到期删除时进入终态 cancelled。 |
+| `pauseReason` | `space_deletion_scheduled`? | paused 时必填；恢复 active 时清空。 |
 | 公共元数据 | `EntityMeta` | 修改只影响该收件人，不改业务时间。 |
 
-不同成员的订阅不复制 ReminderPlan；每个 active subscription 按相同来源发生项展开收件人范围内的 ReminderInstance，同一账号的多个 Device 共享该逻辑实例并各有 NotificationDelivery。一个成员处理共享业务状态后，各订阅实例通过同步取消适用未来投递；仅知道了/稍后等个人提醒动作只改变该 subscription 的实例。
+不同成员的订阅不复制 ReminderPlan；每个 `status=active` 且 `mode!=off` 的 subscription 按相同来源发生项展开收件人范围内的 ReminderInstance，同一账号的多个 Device 共享该逻辑实例并各有 NotificationDelivery。`mode=off` 是成员主动退订但关系仍有效；`cancelled` 是系统终结且不能恢复。一个成员处理完成/跳过或加入共享采购清单等共享业务状态后，各订阅实例通过同步取消适用未来投递；仅知道了/稍后等个人提醒动作只改变该 subscription 的实例。
 
 ### 16.12 `SpaceTransferOperation`
 
@@ -717,14 +749,15 @@ ReminderPlan 属于家庭业务记录；`ReminderSubscription` 决定哪个 Acco
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
-| `recordId`、`sourceSpaceId`、`targetSpaceId` | `EntityId` | 两空间不同；发起时记录属于 source。 |
+| `sourceRecordId`、`sourceSpaceId`、`targetSpaceId` | `EntityId` | 两空间不同；发起时源记录属于 source。 |
+| `targetRecordId` | `EntityId?` | 预检后分配的新 ID，永不等于 sourceRecordId；提交后成为目标空间稳定 ID。 |
 | `initiatedByAccountId` | `EntityId` | 必须同时有来源操作权和目标创建权。 |
-| `state` | `preflight \| awaiting_confirmation \| transferring \| committed \| failed_retryable \| rolled_back` | committed 前记录不能在两空间同时可写。 |
+| `state` | `preflight \| awaiting_confirmation \| transferring \| committed \| failed_retryable \| rolled_back` | transferring 起源记录被写锁定；任何观察点最多只有一个可写副本。 |
 | `baseRecordVersion`、`baseSpaceVersions` | 版本 | 防止预览后对象或成员资格改变。 |
 | `mappingPlan` | 结构化选择 | 分类、标签、关联、提醒和审计处理选择；不复制正文。 |
 | `startedAt`、`completedAt` | `Instant`、`Instant?` | 服务端时间。 |
 
-附件密钥和内容重归属、聚合子对象、目标 membership 与源 move tombstone 必须作为一个可回滚逻辑提交；物理传输可以分步，但在 committed 前目标不可见、来源保持唯一可写。
+“移动”在同步层实现为“目标空间创建新 ID 的完整副本 + 源 ID 永久删除”，不直接改 `spaceId`，也不复用源 ID。服务端协调器先构建不可见目标暂存副本并验证附件，再使目标可见、为源写入 `reason=space_move` 的永久删除墓碑及两空间各自序列；迟到客户端可能短暂只看到一侧，但不能写入源旧版本，也不会因同一 ID 产生复活或跨空间冲突。提交前失败删除暂存目标并解锁源；提交后不提供自动回滚，用户可另行复制为新记录。
 
 ## 17. 聚合事务边界
 
@@ -736,7 +769,10 @@ ReminderPlan 属于家庭业务记录；`ReminderSubscription` 决定哪个 Acco
 | 编辑记录 | 根版本、详情和受影响提醒对账任务。 |
 | 完成/跳过周期实例 | 实例物化、状态、操作记录和提醒取消任务。 |
 | 清单批量完成 | 所有目标项目、派生完成状态和提醒取消任务。 |
-| 库存变化 | 新流水、当前数量缓存、低库存周期变化和适用提醒任务。 |
+| 未绑定库存变化 | accepted 意图、新流水、确认/预估数量缓存、低库存周期变化和适用提醒任务。 |
+| 绑定库存提交 | pending 意图、预估数量缓存和同步 mutation；不创建流水或低库存周期。 |
+| 服务端库存接受 | accepted 意图、新流水、确认数量缓存、低库存周期变化和适用提醒任务。 |
+| 服务端库存拒绝 | rejected 意图、预估数量重算和可处理冲突；不修改确认账本。 |
 | 删除到回收站 | 根生命周期、未来提醒取消任务和必要操作记录。 |
 | 恢复记录 | 根生命周期、派生索引重建标记和未来提醒重建任务。 |
 | 永久删除记录 | 聚合子对象、附件清理任务和适用墓碑。 |
@@ -797,6 +833,14 @@ LocalActor 被 Account 认领后保留原 ID，既有 createdByActorId、updated
 
 ReminderSubscription 只控制某成员设备是否投递，不改变 ReminderPlan、记录、发生项或完成状态。成员退出时取消其订阅；其他成员订阅和共享业务对象继续存在。
 
+### DOM-093：库存只有过账改变确认数量
+
+StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接受的事实。绑定空间只有服务端可以确定 ledgerSequence、quantityBefore、delta 和 quantityAfter；客户端不得先创建一条流水再由服务端重排或重算其不可变字段。
+
+### DOM-094：跨空间移动不保留记录 ID
+
+跨空间移动的目标记录、子对象和附件映射使用新 ID，源 ID 以永久删除墓碑终结。来源关系只写入受权限保护的迁移审计，不成为普通跨空间 RecordLink；任何客户端都不得把源实体改 spaceId 后上传。
+
 ## 19. 领域命令和结果
 
 领域层以显式命令改变数据，至少包括：
@@ -804,7 +848,7 @@ ReminderSubscription 只控制某成员设备是否投递，不改变 ReminderPl
 - `CreateRecord`、`UpdateRecord`、`ArchiveRecord`、`TrashRecord`、`RestoreRecord`、`PurgeRecord`；
 - `CompleteOccurrence`、`SkipOccurrence`、`RescheduleOccurrence`、`SplitRecurrenceSeries`；
 - `CreateChecklistFromTemplate`、`SetChecklistItemCompletion`、`ReorderChecklist`、`SaveChecklistAsTemplate`；
-- `AddStockTransaction`、`CorrectStock`、`AddItemToShoppingChecklist`；
+- `SubmitStockChange`、`ResolveRejectedStockChange`、`AddItemToShoppingChecklist`；
 - `CreateReminderPlan`、`SnoozeReminder`、`AcknowledgeReminder`；
 - `AttachFile`、`RemoveAttachment`、`SetSensitivity`、`SetAiAccess`。
 
@@ -837,6 +881,7 @@ ReminderSubscription 只控制某成员设备是否投递，不改变 ReminderPl
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.7 | 2026-07-26 | 分离库存变化意图与权威流水，定义服务端回收站时钟、成员重新加入 epoch、可恢复提醒暂停、个人低库存确认及新 ID 跨空间移动。 |
 | v1.6 | 2026-07-26 | 将账号/家庭收件人订阅映射到提醒实例，并明确同账号多设备共享逻辑实例、各自投递。 |
 | v1.5 | 2026-07-26 | 将未接受状态完全归属 Invitation，SpaceMembership 从接受邀请的原子事务起进入 active。 |
 | v1.4 | 2026-07-26 | 明确家庭空间所有者来源与删除计划，并增加所有权转移、成员提醒订阅、跨空间移动和服务端可信审计实体。 |
