@@ -16,7 +16,7 @@ React Native 页面状态和普通键值存储无法提供这些事务/查询能
 
 ## Decision
 
-客户端使用 **SQLite + SQLCipher** 作为关系事实库，通过 `expo-sqlite` 的 CNG 配置在 iOS/Android 构建同一能力，并启用 FTS5。TypeScript 访问层采用 **Drizzle ORM 的 Expo SQLite driver** 处理表定义、类型化常规查询和迁移生成；迁移的权威产物是经过评审并带 checksum 的 SQL，关键事务、FTS、完整性、查询计划和 PRAGMA 可以通过封装后的原生 SQLite API 执行。活动数据库不依赖可覆盖固定路径；Database Manager 必须先按 TD-010 解析受认证 `DatasetControlRecord`，再打开其中唯一的 active generation。
+客户端使用 **SQLite + SQLCipher** 作为关系事实库，通过 `expo-sqlite` 的 CNG 配置在 iOS/Android 构建同一能力，并启用 FTS5。TypeScript 访问层采用 **Drizzle ORM 的 Expo SQLite driver** 处理表定义、类型化常规查询和迁移生成；迁移的权威产物是经过评审并带 checksum 的 SQL，关键事务、FTS、完整性、查询计划和 PRAGMA 可以通过封装后的原生 SQLite API 执行。活动数据库不依赖可覆盖固定路径；TD-010 Dataset Controller 必须先恢复 `DatasetControlRecord` 和 validating/activation 状态，再向 Database Manager 交付不暴露路径或 raw key 的 `ActiveGenerationHandle`。
 
 数据库使用随机设备数据密钥，不使用用户口令直接作为 SQLCipher key。密钥解封由 TD-004 负责。应用以单一受控连接管理器打开数据库，P0 只有一个串行写连接；启用 `foreign_keys`、WAL 与 `synchronous=FULL`，所有用户输入使用绑定参数。数据库、WAL、SHM 和索引全部位于 App 私有且排除系统自动备份的目录。
 
@@ -45,7 +45,7 @@ SQLCipher 不受 Expo Go 支持，因此所有数据库测试在 Development Bui
 
 ### 2. 数据库位置与文件集
 
-- 每个 generation 内数据库使用固定内部逻辑名 `database.sqlite`，generation 目录只使用受控不透明 ID，不包含账号、标题、空间名或时间；活动 generation 只由 TD-010 control 解析，不能扫描目录或按 mtime 猜测；
+- 每个 generation 的唯一物理形态为固定根下 `dataset/generations/<opaqueGenerationId>/database.sqlite`；固定的只是目录模板和业务逻辑标识，generation ID 是受控不透明 ID，不包含账号、标题、空间名或时间；活动 generation 只由 TD-010 control 解析，不能扫描目录或按 mtime 猜测；
 - 放在 Application Support/No Backup 等平台等价私有目录；iOS 设置排除云备份资源属性，Android backup rules 排除主库、`-wal`、`-shm`、附件及密钥相关文件；
 - 数据库文件不进入系统文件选择器、分享面板、日志附件或崩溃报告；
 - WAL 与 SHM 是数据库持久状态的一部分，普通文件操作不得单独复制、删除或移动；
@@ -55,19 +55,22 @@ SQLCipher 不受 Expo Go 支持，因此所有数据库测试在 Development Bui
 ### 3. 打开和解锁顺序
 
 ```text
-取得受控 no-backup 数据根
-→ 从安全存储解封 DatasetControlKey
-→ 认证并恢复双槽 DatasetControlRecord
-→ 解析唯一 activeGenerationId、activeKeyId 与 cipher profile
-→ 解封该 generation 的随机 DB key
-→ 构造并验证固定根内 canonical generation 路径
-→ 打开 SQLCipher connection
+Dataset Controller:
+  取得受控 no-backup 数据根和 DatasetControlKey handle
+  → 认证并恢复双槽 DatasetControlRecord
+  → 若 phase=validating，以 maintenance handle 检查 activation marker
+  → 按 TD-010 幂等完成 active 或写更高 sequence 回到 previous
+  → 解析并验证唯一 generation/key/cipher/canonical path
+  → 交付 ActiveGenerationHandle
+Database Manager:
+  使用 ActiveGenerationHandle 打开 SQLCipher connection
 → 立即设置 raw hex key（不插入口令/用户输入）
 → 执行最小读取验证 key 与文件头
 → 读取 cipher/sqlite/compile 版本并验证 allowlist
 → 设置连接 PRAGMA
 → 检查 activation marker、迁移 ledger、Schema 与完整性状态
-→ 若需升级则关闭普通打开并交给 TD-010 candidate migration
+→ 若需升级：关闭普通 handle，保持 Repository gate，交给 TD-010 candidate 状态机
+→ 重新从 Controller 取得 active handle并完成全部 gate
 → 开放 Repository
 ```
 
@@ -76,7 +79,7 @@ SQLCipher 不受 Expo Go 支持，因此所有数据库测试在 Development Bui
 - key 只以固定长度字节/严格 hex 编码短暂进入 native boundary，不组成可记录的普通 SQL 字符串；
 - 数据库 key、`PRAGMA key`、完整 connection string 不得出现在日志、错误、analytics 或 crash breadcrumbs；
 - 在 key 验证和 Schema gate 完成前，任何业务 Repository 均不可取得 connection；
-- control 恢复必须先于普通数据库打开；slot 无效、冲突、引用缺失或 `phase=validating` 时只运行 TD-010 startup recovery，不得退回固定旧路径或创建空库；
+- control 恢复必须先于普通数据库打开；slot 无效、冲突、引用缺失或 `phase=validating` 时只运行 TD-010 startup recovery，不得把 candidate maintenance handle 暴露给 ORM，不得退回固定旧路径或创建空库；
 - “file is not a database”等底层结果不能直接告诉用户是口令错误还是损坏；恢复层根据已知操作上下文映射受控错误；
 - 失败时关闭 connection、清理 key buffer 能控制的副本，并保留原文件，不创建同名空库。
 
@@ -127,7 +130,7 @@ P0 对**当前 active generation** 使用一个长生命周期 connection 和进
 
 ### 8. 迁移协议
 
-数据库内对已完成/正在构建 candidate 的迁移证据至少包含：
+下面 ledger 只存在于已完成 generation 或正在构建的 candidate；`applying` 不是 active 上的可恢复迁移状态：
 
 ```text
 schema_version
@@ -140,7 +143,14 @@ state = applying | applied
 
 TD-010 接受后，所有已发布数据的 schema、data 和 cipher 迁移都遵循 `active → encrypted clone/capture → candidate transform → verify/seal → atomic activation`，不得在 active generation 原地执行。迁移规则：
 
+```text
+resolved_active → preflighted → cloned
+→ transforming(migrationId, phase, lastStableKey)
+→ verified → sealed → validating_active → active → cleanup_pending
+```
+
 1. 编号只增不改；已发布 migration 内容与 checksum 不得改写；
+   artifact 的 `kind/execution/requiredCapabilities`、SQL/transform/manifest digest、portable classification、verification suite 与 minimum/rollback reader version 必须按 TD-010 完整登记，不能只存一段 SQL；
 2. 候选构建前验证 active key、当前版本、剩余空间、内置 migration chain/checksum 和上一 candidate operation 状态；
 3. 能单事务完成的 DDL/DML 在 candidate 的一个事务中执行；需要重建表/文件的迁移使用 TD-010 checkpointed shadow 状态和稳定 keyset；
 4. 新增列先允许旧写入兼容，再回填/验证，最后在后续版本收紧约束；
@@ -163,7 +173,7 @@ TD-010 接受后，所有已发布数据的 schema、data 和 cipher 迁移都�
 
 检查失败进入完整性保护：停止业务写、保留文件、生成无内容诊断 ID，只在安全读路径通过时提供受控导出。修复不得执行“drop and recreate”或自动下载云副本覆盖本地。
 
-checkpoint、FTS optimize/rebuild、`VACUUM` 和统计分析是持久维护任务：只在供电/前台或合适后台机会、空间充足且没有用户事务时运行；可取消并有进度。`VACUUM` 前预留至少数据库大小加安全余量，不能因清理反而耗尽存储。
+checkpoint、FTS optimize/rebuild、`VACUUM` 和统计分析是持久维护任务：统一经 `DatasetMaintenanceLease/DatasetGate` 调度，不与 TD-010 capture 或 activation 并发；只在供电/前台或合适后台机会、空间充足且没有用户事务时运行，可取消并有进度。处理 WAL/SHM/journal 或切换 journal mode 前必须排空并关闭相关 handle/statement/cursor。`VACUUM` 前预留至少数据库大小加安全余量，不能因清理反而耗尽存储。
 
 ### 10. 本地全文索引
 
@@ -235,7 +245,7 @@ FTS5 virtual table 与规范表位于同一个 SQLCipher 数据库，不创建�
 ## Implementation constraints
 
 - 数据库连接只能由 Database Manager 创建，业务模块不能自行 `openDatabase`；
-- Dataset Controller 是 active generation 的唯一解析者；Database Manager 不接受业务层路径，也不得在 control 解析前尝试旧固定路径；
+- Dataset Controller 是 active generation 的唯一解析者；Database Manager 只接受 `ActiveGenerationHandle`，不接受业务层路径/control/raw key，也不得在 control/validating recovery 完成前尝试旧固定路径；
 - Repository/UnitOfWork 不把 Drizzle/SQLite 类型或原始错误暴露给上层；
 - release 构建若 `useSQLCipher`、FTS5、foreign keys 或版本 allowlist 检查失败，启动进入阻断状态，不能降级明文；
 - 自动创建新库只允许确认路径不存在且初始化状态机合法；存在但打不开的文件一律保护；
@@ -267,7 +277,9 @@ FTS5 virtual table 与规范表位于同一个 SQLCipher 数据库，不创建�
 
 ## Rollout and rollback
 
-首个公开版本即使用 SQLCipher，不发布“先明文以后加密”的过渡库。首次内部 spike 数据不进入兼容承诺。之后升级 SQLite、SQLCipher、Expo SQLite 或 Drizzle 时，先在旧数据库副本完成读取/迁移/备份/恢复矩阵，再灰度新构建；若升级失败，回滚到能读取当前 Schema/cipher 的上一构建。已迁移 cipher/Schema 不允许通过商店回滚到不兼容二进制。
+首个保存真实用户数据的版本即使用 SQLCipher，并同时初始化 TD-010 generation 目录和 control 双槽；不发布“固定 `main.db`/先明文以后加密”的过渡库。首次内部 spike 数据不进入兼容承诺。之后升级 SQLite、SQLCipher、Expo SQLite 或 Drizzle 时，先在旧数据库副本完成读取/迁移/备份/恢复矩阵，再灰度新构建；若升级失败，回滚到能读取当前 Schema/cipher/control 的上一构建。已迁移 cipher/Schema/control 不允许通过商店回滚到不兼容二进制。
+
+商店二进制回滚只更换代码；`phase=validating` 且未写 activation marker 的自动回滚只恢复尚未开放写入的旧 generation；active 后的 previous rollback 必须把 previous 当只读源复制成新的 candidate，并经影响预览、fresh auth 与完整 activation，绝不能直接改 control 回指旧数据库。三条路径不得互相替代。
 
 ## References
 
@@ -284,5 +296,6 @@ FTS5 virtual table 与规范表位于同一个 SQLCipher 数据库，不创建�
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-26 | 补足 ActiveGenerationHandle 职责边界、validating 先行恢复、candidate 完整状态机、maintenance lease 和三类回滚语义。 |
 | 2026-07-26 | 对齐 TD-010：先解析 generation control、所有已发布迁移只在 candidate 执行、cipher 变化走隔离 export，并界定 maintenance connection。 |
 | 2026-07-26 | 接受 SQLite/SQLCipher、expo-sqlite、Drizzle、FTS5、单写连接、FULL WAL、迁移与完整性基线。 |
