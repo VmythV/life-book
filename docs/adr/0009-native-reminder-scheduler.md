@@ -4,7 +4,7 @@
 > Date：2026-07-26
 > Decision owners：客户端架构负责人、提醒负责人、安全负责人、质量负责人
 > Scope：P0 iOS/Android 本地系统通知，兼容 P1 多设备投递与远程推送去重
-> Related requirements：REM-001～132、REM-140～142、DOM-070、QR-003、QR-010、QR-030～031、QR-050～052、QR-070～072、QR-100～101、QR-110～112
+> Related requirements：REM-001～132、REM-140～142、DOM-070～073、QR-003、QR-010、QR-030～031、QR-050～052、QR-070～072、QR-100～101、QR-110～112
 > Related ADRs：[TD-001](0001-mobile-client-stack.md)、[TD-002](0002-offline-first-client-architecture.md)、[TD-004](0004-device-key-hierarchy-and-app-lock.md)、[TD-006](0006-cross-platform-scalar-representations.md)、[TD-007](0007-time-recurrence-engine.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、[TD-012](0012-http-api-and-contract-versioning.md)、[TD-022](0022-remote-push-routing.md)
 > Decision gate：两平台真机能力探测、权限/重启/升级/时区矩阵、Expo 原生实现兼容测试、调度预算和全部中断点恢复测试通过后，才允许系统提醒进入公开构建
 
@@ -76,7 +76,7 @@ Notification response → dataset epoch + request-ID fence
 ```ts
 interface NotificationPlatformPort {
   getCapabilitySnapshot(): Promise<NotificationCapabilitySnapshot>;
-  ensureChannelsAndCategories(contractVersion: number): Promise<void>;
+  ensureChannelsAndCategories(registry: NotificationPresentationContractRegistry): Promise<void>;
   listManagedPending(): Promise<ManagedPendingSnapshot>;
   listManagedDelivered(): Promise<ManagedDeliveredSnapshot>;
   upsertOneShot(request: OneShotNotificationRequest): Promise<SubmitReceipt>;
@@ -165,7 +165,8 @@ target Instant
 precision mode
 content policy version + rendered-content digest
 privacy mode
-action/category contract ID
+category contract ID + version
+action contract version
 payload contract version + canonical payload digest
 request identity contract version + notificationDatasetEpoch
 sound/channel/interruption policy
@@ -217,22 +218,23 @@ lockscreenVisibility = PRIVATE
 
 #### 6.3 category 版本
 
-- `ensureChannelsAndCategories` 在接收响应和首次调度前幂等注册全部当前及仍可能回调的上一兼容版本；
-- category ID 包含语义版本，旧版本至少保留到其最后 pending/delivered 生命周期和发布兼容窗口结束；
+- `categoryContractId` 是 REM-060 登记的稳定逻辑 ID，`categoryContractVersion` 是正整数语义版本；二者共同标识 category 合同，不把 `.vN` 拼接约定泄漏为领域身份；
+- `NotificationPresentationContractRegistry` 分别登记不可变 channel 合同与 category 合同；其中 `CategoryContractRegistration` 至少携带上述二元组、`actionContractVersion`、受控 `actionId` allowlist 与 adapter contract version。adapter 可把二元组映射为平台原生 ID，但必须通过受控登记表无歧义反查；
+- `ensureChannelsAndCategories` 在接收响应和首次调度前幂等注册全部当前及仍可能回调的上一兼容版本；旧版本至少保留到其最后 pending/delivered 生命周期和发布兼容窗口结束；
 - 非敏感通知可以展示 REM-060 的动作，但所有 mutating action 都配置为打开前台；
-- 敏感通知映射到只含 Open 的受控 category variant，不出现完成、跳过、知道了、稍后或加入采购清单；
+- 敏感通知固定映射到 REM-060 的 `open_only + categoryContractVersion=1 + actionContractVersion=1`，payload 不携带来源类别，不出现完成、跳过、知道了、稍后或加入采购清单；
 - Android 当前忽略 authentication-required/destructive flags，因此两平台共同安全基线不能依赖这些 flag。iOS 可额外增加保护，但不能绕过 App 内校验。
 
 ### 7. 通知内容、平台副本与备份
 
-可见内容由 `NotificationContentPolicy` 在调度时生成，只允许 REM-070 的三种模式；payload contract v2 严格限制为 REM-071 allowlist，并新增必填非内容字段 `notificationDatasetEpoch`（规范十进制字符串）和 request identity contract version。`OneShotNotificationRequest` 必须携带解析后的 version/epoch；adapter 接口对 title/body 设置长度上限并按 Unicode grapheme 安全截断，不从任意对象序列化 payload。缺失、非法、溢出或未知 epoch 一律作为 legacy/stale，不尝试修复。
+可见内容由 `NotificationContentPolicy` 在调度时生成，只允许 REM-070 的三种模式；payload contract v2 严格限制为 REM-071 的命名字段 allowlist，必填 `payloadContractVersion`、`requestIdentityContractVersion`、规范十进制 `notificationDatasetEpoch`、`reminderInstanceId`、受控 `sourceType`/可空 `sourceId`、`categoryContractId`、`categoryContractVersion`、`actionContractVersion` 和 `deduplicationKeyHash`，P2 才可带不透明 `spaceId`。`OneShotNotificationRequest` 必须携带解析后的合同版本和 epoch；adapter 接口对 title/body 设置长度上限并按 Unicode grapheme 安全截断，不从任意对象序列化 payload。缺失、非法、溢出或未知 epoch 一律作为 legacy/stale，不尝试修复。
 
 当前 Expo Android scheduler 为重启恢复把完整 `NotificationRequest` 序列化到普通 App 私有 `SharedPreferences`。因此：
 
 - 该文件是受控平台副本，不是持久化模型；只保存已经明确允许进入系统通知的最小快照；
 - 敏感记录始终使用通用隐藏文案；附件、正文、清单内容、数量、认证信息和文件路径永不进入请求；
 - 精确识别该 dependency 版本生成的 preferences 文件并通过 Android data-extraction/backup rules 排除 Auto Backup 和 device-to-device transfer；构建测试必须解包 APK/AAB 校验规则；
-- 取消、归档、删除、永久删除、成员失权和隐私变严格时，先取消 pending，再 dismiss delivered，最后写入新的成功水位；
+- 取消、归档、删除、永久删除、成员失权和隐私变严格时，先取消 pending，再 dismiss delivered；只有第 8 节最终 guard-CAS 成功后才写入新的成功水位；
 - 普通内容编辑使用同 ID replace；隐私收紧或删除采用 cancel-first，不能让旧快照在 replace 失败后继续存在；
 - adapter registry 不复制到诊断包、日志、崩溃事件或业务备份；清除本机数据按 TD-004 先取消通知再销毁密钥/文件；
 - 每次 Expo 升级必须检查 Android/iOS 原生源码、存储文件名/格式、备份属性、receiver、触发选择和取消语义；不依赖未声明的内部格式进行业务读取；
@@ -264,20 +266,23 @@ iOS/Android 系统本身保存通知请求是系统功能的必要副本，无�
 13. if environment generation requires rebuild, force re-arm every desired request
 14. cancel remaining undesired managed requests; never global cancel-all in normal reconcile
 15. dismiss obsolete delivered sensitive/deleted/unauthorized requests where supported
-16. persist same-epoch NotificationDelivery receipts, evidence and scheduled-through watermark
-17. if dataset lease/epoch, domain revision, environment generation or settings changed,
-   discard final watermark/receipts as applicable and enqueue rerun
+16. re-read lease/epoch, domain revision, environment generation and settings guards;
+   if any changed, retain real platform receipts only as non-current evidence and enqueue rerun
+17. otherwise CAS-commit same-epoch receipts, NotificationSchedulingDecision rows and publishedRunId
+   in one short transaction whose predicates include every captured guard; publish
+   state=succeeded + scheduledThrough only for a complete successful run, otherwise
+   state=degraded with no current success watermark
 18. release both leases
 ```
 
-平台调用永远不放在 SQLite transaction 内。每个外部动作前后写短事务 checkpoint；进程在任意一步终止后可以重复执行。TD-010 activation exclusive gate 必须等待或撤销 reconciler、response parser 与 action processor 的全部 epoch-bound `DatasetReadLease`，取得 gate 后不再签发新 lease；尚未进入领域事务的动作立即 no-op，已经进入事务的动作必须提交或整体回滚后 gate 才能继续。lease 失效后 reconciler 立即停止新 platform write 和 receipt commit。task checkpoint、revision guard 与 scheduled-through 都绑定 epoch，旧任务不能把新编辑或新数据集标记为已安排。
+平台调用永远不放在 SQLite transaction 内。每个外部动作前后写短事务 checkpoint；进程在任意一步终止后可以重复执行。中间 receipt 可以保存为某次尝试的历史证据，但只有第 17 步 guard-CAS 成功才能发布 `succeeded`/`scheduledThrough`；CAS 失败或提交前崩溃都不能留下当前成功水位。TD-010 activation exclusive gate 必须等待或撤销 reconciler、response parser 与 action processor 的全部 epoch-bound `DatasetReadLease`，取得 gate 后不再签发新 lease；尚未进入领域事务的动作立即 no-op，已经进入事务的动作必须提交或整体回滚后 gate 才能继续。lease 失效后 reconciler 立即停止新 platform write 和 current receipt commit。task checkpoint、revision guard 与 scheduled-through 都绑定 epoch，旧任务不能把新编辑或新数据集标记为已安排。
 
 #### 8.1 差分和强制重挂
 
 - iOS `listManagedPending` 返回本 App 当前 pending，可按 request ID/fingerprint adapter metadata 做差；
 - Android 返回 Expo registry，只能证明 adapter 曾登记，不能证明 AlarmManager 仍有闹钟。投递状态仍可记 `accepted`，但证据必须为 `android_registry_only`，界面不能声称“系统队列已确认”；
-- 当前 Expo Android 路径可能先写 registry、再调用 AlarmManager。Android 只有同时满足“registry 中 request/fingerprint/epoch 匹配”和“最新 attempt 是同 dataset epoch、fingerprint、precision、capability/environment generation 的 `accepted` 成功回执”时才允许跳过 upsert；单独 registry 条目永远不产生 `accepted`；
-- 每次外部提交前先以递增 attempt sequence 写 `requested` checkpoint，AlarmManager/adapter 正常返回后才写 `accepted`。最新 attempt 为 `requested`、`rejected`、`missing`、`cancelled`，或没有对应成功回执时，一律同 ID 重挂；不能回退采用更早的 accepted；
+- 当前 Expo Android 路径可能先写 registry、再调用 AlarmManager。Android 只有同时满足“registry 中 request/fingerprint/epoch 匹配”和“同一身份的最新 attempt 是同 dataset epoch、fingerprint、precision、capability/environment generation、adapter contract 的 `accepted` 成功回执”时才允许跳过 upsert；单独 registry 条目永远不产生 `accepted`；
+- 每次外部提交前先以递增 TD-006 LongCounter `attemptSequence` 写 `requested` checkpoint，AlarmManager/adapter 正常返回后才写 `accepted`。最新 attempt 为 `requested`、`rejected`、`missing`、`cancelled`，或没有对应成功回执时，一律同 ID 重挂；不能回退采用更早的 accepted；
 - Android 在 boot、App/Expo 升级、恢复检测、time/timezone change、exact capability/environment generation 变化后，忽略 registry 的“存在”结论，对全部 selected desired 执行同 ID re-arm；
 - exact 权限撤销可能直接停止 App、删除 exact alarms 且没有可依赖的撤销回调。下一次系统允许 App 运行时重新查询 capability，转 approximate 并强制重挂；不得承诺撤销瞬间自动恢复；
 - exact 权限授予广播只标记 generation；receiver 不直接读取数据库或安排内容；
@@ -295,7 +300,7 @@ iOS/Android 系统本身保存通知请求是系统功能的必要副本，无�
 
 - 48 是产品保守预算，不是对历史“64 条”说法的依赖，也不代表 Apple 公共 API 的永久保证；
 - 普通候选按 REM-092 稳定排序占用普通上限；未用预留可以在本轮末尾借给普通候选，但必须在下轮能被高优先级动作抢占；
-- snooze 或近期编辑可以逐个驱逐最远且优先级最低的普通请求，但总数永不超过平台预算；被驱逐实例保持 planned/waiting-capacity，并更新水位；
+- snooze 或近期编辑可以逐个驱逐最远且优先级最低的普通请求，但总数永不超过平台预算；被驱逐实例保持 `planned`，并发布 `capacity_deferred` Decision；
 - 权限、channel、OS/OEM 或真机证据要求更低预算时，使用带版本、本地签名/构建内配置下调，不能远程提高到未经测试的值；
 - 预算不限制数据库实例数；覆盖不足显示已安排水位和待补齐数量。
 
@@ -331,15 +336,17 @@ Android exact permission state broadcast 只可靠表示获得能力；撤销路
 
 ```text
 bounded response parse
-→ acquire TD-010 DatasetReadLease bound to active generation + epoch
+→ acquire short TD-010 parser lease bound to active generation + epoch
 → payload epoch == current active control epoch
 → recompute lbr2 request ID and constant-time compare
-→ persist encrypted ActionInbox
-→ unlock + current authorization/state check
-→ immediately recheck epoch before application command
+→ persist encrypted ActionInbox and release parser lease
+→ unlock without holding a DatasetReadLease
+→ acquire a fresh action/navigation lease bound to the then-active generation + epoch
+→ recheck inbox epoch, current authorization/category/state and current request identity
+→ immediately execute navigation or enter the application-command transaction
 ```
 
-旧/缺失/非法/future epoch、`lbr1:` 或 payload/request ID 不一致不得进入业务 inbox、目标导航或 mutation；最多打开无目标首页，随后安全清除 Expo last response 并定向清理旧通知。
+旧/缺失/非法/future epoch、`lbr1:` 或 payload/request ID 不一致不得进入业务 inbox、目标导航或 mutation；在 active Repository 下可以打开无目标首页，随后安全清除 Expo last response 并定向清理旧通知。若 control 为 `validating`、integrity-blocked 或 Repository 未开放，response 是 `deferred_unclassified`：只做 bounded parse 与平台要求的 completion acknowledgement，不入箱、不清 last response/目标通知、不导航；重新进入 active 后从 parser fence 起重试。平台无法保留 response 时只能结束到无目标首页并记录无内容诊断，不得记为业务 no-op。
 
 ```text
 actionInboxId
@@ -348,6 +355,7 @@ platformRequestId
 notificationDatasetEpoch
 installationId + transport
 categoryContractId
+categoryContractVersion
 actionId + actionContractVersion
 opaque reminder/source identifiers from REM-071 payload
 payloadContractVersion
@@ -359,10 +367,10 @@ non-content platform metadata
 ```
 
 - `responseId` 是 transport 回调身份，`platformRequestId` 是项目生成的 `lbr2:` 请求身份，二者不得复用；平台内部 adapter ID 另作可空非内容 metadata；
-- `categoryContractId` 标识注册类别，`actionId` 标识用户实际选择，`actionContractVersion` 标识动作语义版本；三者缺一不得猜测；
-- `actionInboxId`/唯一键为 NUL 分隔 canonical bytes 的 `SHA-256("life-book/notification-action/v2\u0000" + epoch + "\u0000" + platformRequestId + "\u0000" + categoryContractId + "\u0000" + actionId + "\u0000" + actionContractVersion + "\u0000" + payloadContractVersion)`；同一通知动作重放返回既有结果；
+- `categoryContractId + categoryContractVersion` 标识注册类别，`actionId` 标识用户实际选择，`actionContractVersion` 标识动作语义版本；四者缺一不得猜测；
+- `actionInboxId`/唯一键为 NUL 分隔 canonical bytes 的 `SHA-256("life-book/notification-action/v2\u0000" + epoch + "\u0000" + platformRequestId + "\u0000" + categoryContractId + "\u0000" + categoryContractVersion + "\u0000" + actionId + "\u0000" + actionContractVersion + "\u0000" + payloadContractVersion)`；整数先转为无前导零 ASCII 十进制，相同通知动作重放返回既有结果；
 - adapter 先校验 payload 大小、版本、category/action allowlist 和 ID 格式，未知输入只允许安全打开首页，不执行命令；
-- mutating action 必须打开 App；应用锁开启时先进入无内容锁屏，解锁后重新读取 ReminderInstance、来源、space membership/tenure 和权限；默认打开也只有通过 epoch/request fence 后才可导航到不透明目标；
+- mutating action 必须打开 App；应用锁开启时先释放 parser lease 并进入无内容锁屏，绝不让人机等待占用 activation gate。解锁后取得 fresh action lease，重新读取 ReminderInstance、来源、space membership/tenure、category 和权限；默认打开也必须在紧邻导航前以 fresh lease 重做 epoch/request/授权 fence，才能导航到不透明目标；
 - 当前状态有效且执行前 epoch 再次匹配后才转换为 application command，命令自身继续使用领域幂等键；平台回调绝不能直接 update 表；
 - action processor 必须在一个领域事务中消费 current-epoch inbox、提交业务 mutation/幂等结果并写后续 reconcile task；command commit 前 lease/epoch 改变则整体中止，不留下已消费 inbox 或半个业务动作；
 - response 持久化成功后清除 Expo last notification response，防止冷启动重复；若清除失败，inbox 唯一键吸收重放；
@@ -392,17 +400,24 @@ adapterContractVersion
 environmentGeneration
 ```
 
-具体物理表由持久化 Schema 文档定义。`ReminderInstance.state` 是收件人范围内的逻辑生命周期，不保存“本设备正常”。P0 只有一个 installation 时，当前非失效 delivery accepted 后可进入 scheduled；P1 同一实例跨多个 Device 共享，至少一个当前适用设备存在 accepted delivery 时才可聚合为 scheduled，单台设备失败不能把共享实例改成 failed。每台设备的已安排、近似、等待权限、registry-only、预算不足和失败状态始终从该设备 `NotificationDelivery` 派生；accepted 不表示展示或用户已读。
+具体物理表由持久化 Schema 文档定义。`ReminderInstance.state` 是收件人范围内的逻辑生命周期，不保存“本设备正常”。P0 只有一个 installation 时，同一身份的最新 attempt 在 epoch、request ID、fingerprint、precision、environment/capability generation 和 adapter contract 全匹配且 `status=accepted` 后，实例才可进入 `scheduled`。单次真实 adapter/platform 尝试由 `NotificationDelivery` 记录；权限预检、channel 阻断或预算淘汰没有平台调用，不能伪造 Delivery。
 
-accepted evidence 必须同时匹配 request ID、dataset epoch、fingerprint、precision、capability/environment generation；只有同 epoch 的 accepted receipt 能抑制 upsert。`scheduledThrough` 必须同时带 dataset epoch、platform、预算、能力 generation、tzdb/recurrence version 和完成时间；任一输入变化即失效。portable backup 不包含 Delivery/ActionInbox；schema migration 保留 epoch，restore/manual rollback 后旧行不可作为当前证据。诊断只输出随机/不透明 ID、时间、稳定错误、能力和水位，不输出 title/body/payload 或 Expo registry 原文。
+每轮对账另生成 device-only `NotificationSchedulingDecision`。唯一身份绑定 `(installationId, notificationDatasetEpoch, platform, reminderInstanceId, reconciliationRunId)`，至少携带 `platformRequestId?`、`scheduleFingerprint`、`decision`、`reasonCode?`、`requestedPrecision`、`environmentGeneration`、`inputFingerprint` 和 `computedAt`；`decision` 固定为 `eligible_selected | permission_blocked | channel_blocked | capacity_deferred | unsupported | retryable_error | terminal_error`。exact 权限拒绝但成功选择 approximate 时仍是 `eligible_selected + requestedPrecision=approximate`，不能误报阻断。实现可以先写 dormant run rows，但只有第 17 步 guard-CAS 才把 `NotificationReconciliationState.publishedRunId` 切到该 run；未发布或其他 epoch 的 row 对 UI 不可见，也不进入 portable backup/同步/导出。
+
+单条设备状态按固定优先级派生：同一身份的最新 attempt 全部合同匹配且 `status=accepted` 时显示已安排/近似安排；否则从 current-epoch、当前 `publishedRunId` 的 decision 显示等待权限、等待补齐或失败；没有当前 decision 且全局 state 为 pending/running 时显示“正在重新检查”。全局 `scheduledThrough` 和最近成功时间只来自 same-epoch `NotificationReconciliationState.state=succeeded`；degraded 不抹掉仍匹配的单条 accepted Delivery，但不发布成功覆盖水位。accepted 不表示展示或用户已读。
+
+P1 跨 Device 的 scheduled/failed 聚合不能由只看见本机 device-only 行的客户端推断。TD-020/022 必须定义 server-owned、无内容的 `ReminderDeliveryAggregate`、当前适用设备集合/失活期限和并发合并规则后，才允许写收件人范围聚合状态；在该合同落地前只展示当前 installation 状态，单台设备失败不能把共享实例改成 failed。
+
+accepted evidence 必须同时匹配 request ID、dataset epoch、fingerprint、precision、capability/environment generation 和 adapter contract version；只有同 epoch 的 accepted receipt 能抑制 upsert。`scheduledThrough` 必须同时带 dataset epoch、platform、预算、能力 generation、tzdb/recurrence/adapter contract version 和完成时间；任一输入变化即失效。portable backup 不包含 Delivery/ActionInbox/Decision/ReconciliationState；schema migration 保留 epoch 和合法同 epoch 设备投影，restore/manual rollback 后旧行不可作为当前证据。诊断只输出随机/不透明 ID、时间、稳定错误、能力和水位，不输出 title/body/payload 或 Expo registry 原文。
 
 ### 12. 数据集替换与恢复后收敛
 
 - 只有真正提交的整体 restore/manual rollback 才把 `notificationDatasetEpoch` 从激活门内重新读取的当前值 checked `+1`；`phase=validating` 且没有 activation marker 而回到 previous 时恢复原 epoch、增量为零，marker 后完成 target 激活不得再次递增，schema/cipher migration 始终保持 epoch；
 - 新 control 进入 `phase=active` 后，旧、缺失、非法或 future epoch 的 pending/delivered/response 即刻失效；正确性不依赖平台清理成功。强制对账先定向清理 stale epoch，再计算并挂载 current-epoch request；
-- TD-010 必须在 activation-marker 的 durable transaction 内激活一个绑定 target generation、target epoch 和 `reason=dataset_epoch_changed` 的 force-reconcile task；`RestoreSucceeded` 只要求新 Repository 可用且该任务已经耐久存在，不等待平台清理/重挂；后续失败进入 `degraded_reconciliation` 并显示“恢复成功，提醒正在重新检查”；
+- TD-010 必须在 activation-marker 的 durable transaction 内激活一个绑定 target generation、target epoch 和 `reason=dataset_epoch_changed` 的 force-reconcile task；`RestoreSucceeded` 只要求新 Repository 可用且该任务已经耐久存在，不等待平台清理/重挂；后续失败的恢复 API/UI postcondition 为 `RestoreSucceeded + degraded_reconciliation`，实体 `NotificationReconciliationState.state=degraded`，并显示“恢复成功，提醒正在重新检查”；
 - dataset replacement 不推进 `environmentGeneration`。后者只因权限、系统时间/时区、重启、adapter/OS 能力等平台环境变化而推进，不能替代 dataset epoch；
-- portable restore/manual rollback mapper 排除 `NotificationDelivery`、`NotificationActionInbox`、平台 ID、reconcile task/checkpoint/watermark。依赖设备投递证据的 `scheduled`/`failed` 实例在来源仍有效且目标仍在未来时重置为 `planned`；已过去目标按 REM-032 处理且不补发；`acknowledged`、`snoozed`、`cancelled`、`expired` 终态保留；`paused` 仅在暂停原因仍成立时保留，否则按未来/过去重新判断；
+- portable restore/manual rollback mapper 不从源 dataset/candidate 导入 `NotificationDelivery`、`NotificationActionInbox`、`NotificationSchedulingDecision`、平台 ID、旧 reconcile task/checkpoint/watermark。来源按 REM-021 已失效时转 `cancelled`；`acknowledged`、`snoozed`、`cancelled`、`expired` 业务终态保持；`paused` 仅在暂停原因仍成立时保持。其余依赖设备证据的 `scheduled`/`failed` 若来源仍可操作，未来转 `planned`，过去也转 `planned` 并由 `scheduledFor <= now` 派生 application-only 待查看/逾期，reconciler 永久过滤该过去目标且绝不补发；过去且来源已不可操作时转 `expired`。所有 `scheduled`/`failed` 规范化都清除技术 `failureCode`，离开 `paused` 时清除 `pauseReason`；
+- TD-010 在 candidate 内另建 dormant target-epoch force task，并只在 activation-marker transaction 激活；“不导入旧 task”不表示成功恢复后没有新任务；
 - schema/cipher migration 不是数据集替换：它保持 epoch、合法同 epoch Delivery 和实例状态，不执行上述 portable normalization。
 
 ## Alternatives considered
@@ -488,7 +503,7 @@ accepted evidence 必须同时匹配 request ID、dataset epoch、fingerprint、
 - pending/delivered DTO、request、fingerprint、receipt、task 和 watermark 都必须携带 canonical dataset epoch；旧 `lbr1` 只能枚举/定向清理，不能执行动作；
 - 所有 title/body/payload/category/channel 构造只能来自受控 mapper；日志 API 接收 DTO 时必须自动裁剪内容字段；
 - action inbox processor 只能调用 application commands，不能直接访问 repository implementation；
-- response parser、action processor 和 reconciler 都只能持有绑定 active generation/epoch 的短 `DatasetReadLease`；activation gate 取得后不得新发 lease；
+- response parser、action processor 和 reconciler 都只能持有绑定 active generation/epoch 的短 `DatasetReadLease`；parser 写完 inbox 必须释放 lease，任何应用锁/用户等待都不持有 lease，解锁后重取 fresh action/navigation lease；activation gate 取得后不得新发 lease；
 - environment generation 的 wrap/corruption 视为 changed，并强制重挂；
 - 对账 lease 使用 wall-clock-independent expiry 或带 boot/session identity 的安全恢复，不能因用户回拨时钟永久占用；
 - 物理 Schema、索引和 retention 在本地持久化文档定义；接口 JSON/错误码在契约文档定义，本 ADR 不成为第二份字段权威；
@@ -502,14 +517,18 @@ accepted evidence 必须同时匹配 request ID、dataset epoch、fingerprint、
 - 30 日窗口、过去目标、低库存下个整分钟、DST gap/overlap、时区/tzdb 变化与 TD-007 fixture 联测；
 - 同 ID edit replace、新 ID snooze、privacy tighten cancel-first、删除/归档/失权 dismiss；
 - 对每个 reconcile 外部调用前后注入 kill，重启后无重复领域动作、无旧隐私内容、最终 pending 集合收敛；
+- 在最终 guard 读取前后、Decision/publishedRunId/succeeded 水位 CAS 的每个写点注入 kill；只有全谓词匹配的单一提交可发布成功水位，真实但过期的 receipt 不得成为当前证据；
 - domain revision/environment generation 在执行中变化会重新排队；旧任务不能提交新 revision 的旧内容；
 - Android registry 假阳性、空 registry/有 alarm 不可见、exact revoke、permission grant、channel blocked 和 adapter error mapping；
-- action response 重放、未知 action/version、过期来源、删除、成员失权、锁定/解锁和 Expo last response 重放；
+- action response 重放、未知 category/action ID 或版本、category 版本篡改、过期来源、删除、成员失权、锁定/解锁和 Expo last response 重放；
+- 相同 epoch/request/category/action/payload 但不同 `categoryContractVersion` 必须得到不同 actionInboxId；旧类别版本只按旧 allowlist 解释，绝不映射成新版动作；
 - committed restore/manual rollback 使 epoch 恰好递增一次；`validating` 无 marker 回 previous 增量为零，marker 后完成 target 不得二次递增，migration 增量始终为零；溢出阻止替换且不回绕；
-- old/future/missing/malformed epoch、payload/request-ID 不一致、同业务 ID 的旧 delivered response、action 在 control 切换前后和 inbox 已写未执行竞态全部 no-op；
-- validating 期间 response 无法取得 lease；activation gate 会等待或撤销 parser/processor，事务内动作只能完整提交或完整回滚；
+- old/future/missing/malformed epoch、payload/request-ID 不一致和同业务 ID 的旧 delivered response 在 active control 下全部 targetless no-op；
+- action 在 control 切换前后及 inbox 已写未执行的竞态结果只能是完整旧事务、`validating` defer、stale targetless no-op、完整 current 事务或 current `business_noop`；validating 期间 response 无法取得 lease，activation gate 会等待或撤销 parser/processor，绝不出现半事务；
+- parser lease 写 inbox 后立即释放；模拟任意时长锁屏等待和期间 dataset replacement，fresh action/navigation lease 必须阻止旧目标导航与 mutation，且 activation gate 不被用户等待占用；
 - success 后、平台 stale cleanup 前，旧 response 已因 epoch fence no-op；same-epoch force-reconcile task 已耐久但平台清理/重挂失败仍返回 `RestoreSucceeded + degraded_reconciliation`；
-- restore/manual rollback 后 `scheduled`/`failed`/`paused` 按第 12 节规范化，过去目标不补发；migration 保持合法同 epoch evidence；
+- restore/manual rollback 后穷举来源失效/可操作、future/past、业务终态、暂停原因成立/失效：`scheduled`/`failed`/`paused` 必须按第 12 节得到唯一状态并清理适用 reason，所有过去目标不补发；migration 保持合法同 epoch evidence；
+- permission/channel/capacity 在零 platform call 时仍发布逐实例 Decision；dormant/旧 epoch/非 published run 不可见，accepted Delivery、Decision 与全局水位按第 11 节固定优先级派生；
 - 混合 lbr1/lbr2 pending、Android registry 和 delivered 的定向 cancel/dismiss、容量占用、崩溃恢复与最终收敛；
 - payload/schema fuzz、长度边界、Unicode 截断和日志/诊断无内容断言；
 - Android backup/restore 测试证明 notification preferences、environment this-device state 和 installation ID 不迁移；
@@ -566,6 +585,8 @@ exact 权限不可用、channel 被关闭或平台行为不确定时自动回落
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-26 | 补齐短 parser/fresh action lease、guard-CAS 成功水位、逐实例 NotificationSchedulingDecision、确定性恢复状态映射及 validating defer。 |
+| 2026-07-26 | 将 category 合同统一为稳定 ID + 显式版本，补齐 payload 精确字段、ActionInbox 类别版本幂等输入和 adapter-version 成功证据。 |
 | 2026-07-26 | 收紧所有目标 response 的 epoch fence、action inbox 身份/事务边界、activation lease，以及数据集替换后的状态规范化和 durable force-reconcile。 |
 | 2026-07-26 | 引入 TD-010 notificationDatasetEpoch fence，升级 lbr2/payload/action/delivery/watermark，并补齐 delivered 枚举、恢复竞态和旧格式清理。 |
 | 2026-07-26 | 澄清权限能力决策表、Android registry 与同代成功回执双重判断、崩溃后强制重试，以及 P1 共享实例和设备投递的状态边界。 |
