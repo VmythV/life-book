@@ -64,6 +64,8 @@ final authenticated chunk with TAG_FINAL
 
 `ContentHash` 使用解密后原始字节的 SHA-256，边读边算，只用于完整性、备份清单和重复提示。它保存在 SQLCipher/加密 manifest 内，不作为文件名、公开 ETag、日志字段或用户身份；hash 相同不能跳过权限、引用或附件创建。
 
+`CiphertextIdentity` 与 `ContentHash` 是两个不能互换的值。前者采用版本化 canonical tuple `privateFormatVersion + exactCiphertextByteLength + SHA-256(完整密文文件字节)`，在 promote 后关闭/重开文件流式计算并写入 SQLCipher 技术元数据；sealed root manifest 和条件 GC 使用它确认 locator 没有被替换。它同样不得出现在公开文件名、日志、遥测或未加密诊断中。
+
 ### 3. 目录布局
 
 ```text
@@ -73,6 +75,8 @@ attachments/
   quarantine/<randomLocator>
   plaintext-cache/<sessionRandom>
 ```
+
+目录名 `active` 只表示 object 已完成 promote，不表示它只属于当前 dataset generation；该共享不可变 object store 跨 generation 使用。可见性由当前数据库引用决定，保留性由动态/冻结 root 与 operation lease 决定，generation 切换不移动、覆盖或批量重命名附件。
 
 - 只有 File Store 可以解析路径；所有调用者传不透明 locator/operation ID；
 - locator 使用安全随机受控编码并在 adapter 内做完整正则/根目录归属校验，不接受用户路径、`..`、绝对路径、URI 或软链接；
@@ -121,6 +125,8 @@ reserved
 
 必要附件在 `encrypted_verified/promoted` 前失败时，表单保留并让用户移除失败附件或取消保存，符合 BR-023。一个记录多附件保存时，所有待绑定文件必须先 promoted，SQLite 关系在一个事务提交；部分字节 orphan 可清理，但业务关系不得部分创建。
 
+restore/migration candidate 产生的新密文即使尚未绑定 active DB，也必须由 candidate/operation root lease 保护。取消、崩溃恢复或 orphan 扫描只能提交 `ConsiderAttachmentForGc`，并在重新求得全部 roots/leases 后决定是否回收；不得凭“尚未出现在 active DB”直接删除。
+
 ### 6. 附件状态与读取
 
 领域 `Attachment.status` 仍是 `processing | available | missing | corrupt`：
@@ -159,16 +165,16 @@ reserved
 
 - Record 移到回收站时附件关系和密文保留，供 30 天恢复；
 - 普通“移除附件”先删除可见关系并保留撤销状态，撤销窗口结束后持久任务检查所有引用；
-- active generation 中所有仍需保留字节的 locator-bearing `Attachment` 行是当前动态 GC root，包含权威原附件和仍被引用的派生缩略图；candidate/capture 和 active 即将变为 previous 时，由 TD-010 在写 gate 内生成受认证、冻结的 locator + expected ciphertext identity manifest；
-- 只有 active 动态 root、sealed previous/candidate/capture manifest 以及 backup/restore/upload/导入 operation lease 都不引用时，才能删除密文和 key envelope；activation 时的 candidate root 不能在开放业务写入后代替 active 动态 root；
-- 永久 purge 在数据库事务移除关系/元数据并写 `DeleteAttachmentBytes(locator, expectedHash)` 任务；任务重复执行视“文件已不存在”为成功，但 locator/hash 不匹配时停止并隔离；
+- active generation 中所有仍需保留字节的 locator-bearing `Attachment` 行是当前动态 GC root，包含权威原附件和仍被引用的本地派生缩略图；candidate/capture 和 active 即将变为 previous 时，由 TD-010 在写 gate 内生成受认证、冻结的 locator + expected `CiphertextIdentity` manifest；sealed generation 只必须保留权威原附件，派生缩略图可以清空引用并在再次 activation 后重建；
+- 只有 active 动态 root、sealed previous/candidate/capture manifest 以及 backup/restore/manual-rollback/upload/导入/未完成 bind operation lease 都不引用时，才能删除密文和 key envelope；activation 时的 candidate root 不能在开放业务写入后代替 active 动态 root；
+- 永久 purge 在数据库事务移除关系/元数据并写 `ConsiderAttachmentForGc(locator, expectedCiphertextIdentity)` 任务；任务执行时重新求全部 roots/leases，后来又被引用则成功 no-op/延后，文件已不存在可幂等成功，locator/identity 不匹配则停止并隔离，绝不能按入队时 refcount 直接删除；
 - 删除 thumbnail 不影响原件；删除原件同时排队其派生缩略图；
 - orphan scanner 只遍历受控 attachments 子目录，对比全部动态/冻结 root 和 operation lease，设至少 24 小时安全年龄，绝不删除刚完成但事务尚未提交、备份正在读取或回滚检查点仍保留的文件；
 - 失败清理可重试并显示存储仍占用，不把删除失败恢复成业务 Attachment。
 
 ### 10. 备份、恢复与同步
 
-- P0 备份在 TD-010 snapshot attachment lease 下，通过授权解密流读取**权威原附件明文**并直接送入 TD-011 独立备份密钥保护的载荷流；容器不得包含设备密文、FileDataKey/ARK envelope、storage locator 或内部路径；
+- P0 备份的 File Store 输入只能是 TD-010 在同一写 gate 中冻结并认证的 `available` 权威原附件 manifest + read/root lease；逐项通过 locator 与 `CiphertextIdentity` 打开、认证解密并直接送入 TD-011 独立备份密钥保护的载荷流，lease 持有到容器成功或失败清理完成。来源随后 purge 也不能删除 lease 内对象；容器不得包含设备密文、FileDataKey/ARK envelope、storage locator 或内部路径；
 - 缩略图是派生附件，不进入 portable DB 或备份载荷；projector 删除其 Attachment 行并清空原附件的 `thumbnailAttachmentId`，恢复 activation 后排队重建；
 - 恢复在隔离区验证备份 auth/hash 后为每个原附件生成接收设备的新 FileDataKey、envelope、locator 和密文，置于 candidate root lease；TD-010 只有在 candidate 数据库与附件 root 全部验证后才原子切换逻辑数据集；
 - 导出是明确的未加密副本，走临时明文规则和风险确认；
@@ -236,6 +242,7 @@ reserved
 ## Implementation constraints
 
 - 只有 Attachment File Store 可以打开内部附件路径；Presentation/Domain 只见 ID、metadata、stream handle；
+- File Store 只提供 opaque locator 的 promote/open/identity/lease/root-enumeration/conditional-GC 能力；`generation-root.enc`、control slot、generation activation 和 root 保留策略由 TD-010 Dataset Controller 拥有，File Store 不自行切换数据集；
 - 密码操作、hash、文件 IO、图片 decode 不在 JS/UI 主线程；进度节流，不能逐块触发渲染；
 - 加密失败不得保留明文 fallback；解密 auth 失败不得返回部分内容；
 - `storageLocator` 是不透明值，序列化/备份/同步时不能误当跨设备路径；
@@ -251,6 +258,7 @@ reserved
 - 官方/自建固定 fixture 跨 iOS/Android round-trip；空、1 byte、边界±1、50 MB；
 - wrong key/header、每一块单 bit 修改、截断、重复、重排、删除 FINAL、两个 FINAL、尾随字节、超大/溢出 length 全部拒绝且无部分明文；
 - envelope nonce/key/associated-data 不匹配拒绝；同一明文两次加密产生不同密文；
+- 完整密文 byte length/digest 任何变化都会改变 `CiphertextIdentity`；root/metadata expected identity 不匹配只能隔离，不能打开或删除另一个对象；
 - root rewrap 和 file-key full rotation 在每个 kill point 可恢复；
 - release 日志/崩溃/heap instrumentation 不出现 key、文件名和明文样例。
 
@@ -286,5 +294,6 @@ reserved
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-26 | 增加 CiphertextIdentity、共享 object store 语义与重新求根的条件 GC；冻结 snapshot lease 和 Dataset Controller/File Store 所有权。 |
 | 2026-07-26 | 对齐 TD-010/011：区分 active 动态 root 与 sealed generation manifest，补齐全部 GC lease，并冻结 portable 原附件重加密与缩略图重建规则。 |
 | 2026-07-26 | 接受 per-file key、secretstream 256 KiB 分块、加密暂存/原子提升、独立缩略图和可恢复 GC。 |
