@@ -29,7 +29,7 @@
 - 用户备份先得到 current-device-only capture，再从空的 portable schema 按表/列覆盖白名单复制到每备份随机 `SnapshotDataKey` 加密的新 SQLCipher DB；未分类字段直接失败，绝不把完整活动物理库塞进容器；
 - 已发布数据库迁移全部在 candidate generation 上执行，不原地改变 active generation；失败只丢弃 candidate；
 - 恢复把 portable DB 当不可信只读输入，逐表逐字段复制到当前 schema/current-device key 的新 candidate，并重加密附件；禁止对用户输入直接执行 `sqlcipher_export`、trigger、view 或 extension；
-- attachment store 继续使用共享、随机 locator 的不可变密文文件；active/previous/candidate/backup lease 各有受认证 root，GC 只有在所有 root 都不引用后才可清理。
+- attachment store 继续使用共享、随机 locator 的不可变密文文件；active generation 以当前数据库 `Attachment` 集合作动态 root，sealed previous/candidate/capture 使用冻结的受认证 manifest，backup/upload 等 operation 使用 lease；GC 只有在全部动态/冻结 root 和 lease 都不引用后才可清理。
 
 “原子恢复”在本项目中的可测试定义是：任一进程/系统崩溃后，启动只能选择旧或新**完整逻辑数据集**，不会把一方数据库和另一方可见附件关系混合。系统通知、搜索索引、缩略图和今天投影是切换后的可重建外部副本，不属于文件系统原子边界。
 
@@ -92,8 +92,9 @@ attachments/
 - generation ID 是新的 TD-006 EntityId，只用于本机数据集版本，不含账号、空间、时间或内容；
 - SQLite 文件没有 hard link/symlink/别名，始终以唯一 canonical path 打开；同一 generation 的 `-wal/-shm` 只与该文件同目录存在；
 - attachment locator 全局随机且正文不可变；哪个附件可见只由当前数据库引用决定；
-- `generation-root.enc` 是设备认证加密的 locator/root manifest，至少绑定 generation ID、数据库 schema/cipher/key ID、附件 locator + expected ciphertext identity 的排序摘要、createdAt 和保留原因；它不进入用户备份；
-- active、previous rollback、restore candidate、backup read 和 upload read 都是 GC roots。孤儿清理不得只看当前数据库；
+- `generation-root.enc` 是 **sealed generation** 的设备认证加密 locator/root manifest，至少绑定 generation ID、数据库 schema/cipher/key ID、附件 locator + expected ciphertext identity 的排序摘要、createdAt 和保留原因；candidate/capture 封口时生成，active 即将变为 previous 时从同一写 gate 下的当前数据库重新冻结；它不进入用户备份；
+- active generation 的 GC root 是当前数据库中 `available` 权威原附件的动态集合，不使用 activation 时冻结的 `generation-root.enc` 判定当前集合；previous rollback、sealed candidate/capture 使用冻结 manifest，backup/upload/restore 使用 operation lease。孤儿清理必须合并所有这些 root；
+- `candidateRootDigest` 只认证 activation 时的 candidate 初始附件集合和 sealed root，active 开放写入后不再代表其当前附件集合，也不得据此保留或删除 active 附件；
 - staging/quarantine 只允许受控单项路径 API；用户输入不能成为文件名或相对路径。
 
 `DatasetControlRecord` 使用由 TD-004 Key Manager 生成、DWK 包装的独立 256-bit `DatasetControlKey` 认证加密。两个 slot 交替写，明文逻辑结构为：
@@ -110,8 +111,11 @@ targetDatabaseSchemaVersion
 targetCipherProfileId
 activeKeyId
 candidateRootDigest
+notificationDatasetEpoch        -- exact unsigned counter; logical dataset replacement fence
 activatedAt?
 ```
+
+`notificationDatasetEpoch` 在初始化时为 `0`，普通 schema/cipher migration 保持不变，整体 restore 和 manual rollback 从**当前 active control** 做 checked `+1`；溢出即阻止操作。它与 candidate 在同一个 validating control slot 原子切换，并纳入 TD-009 request ID、payload 和 action 校验，因此旧数据集已展示通知即使含相同业务 ID 也只能成为 no-op。
 
 写 control 的唯一协议：选择 inactive slot → 写同目录随机 temp → flush 文件 → 平台写屏障 → atomic rename/move 覆盖 slot → 同步父目录 → read-back 解密并比较。Android 必须使用同文件系统 `ATOMIC_MOVE` 且验证结果；不支持时阻止切换，不能回退到 delete-then-move。Apple 使用同文件系统 `rename` 和受控 `F_BARRIERFSYNC`，发布门按目标系统决定是否还要求 `F_FULLFSYNC`。
 
@@ -241,9 +245,9 @@ TD-011 完成 header/KDF/AEAD/manifest/成员边界认证后，portable SQLCiphe
 
 - 先把外部 provider 内容稳定到 App 私有加密 staging，不长期依赖外部 URI；
 - 使用 `READONLY`、`NOFOLLOW`/平台等价防 symlink，固定 canonical path；
-- 设置 `SQLITE_DBCONFIG_DEFENSIVE`、`trusted_schema=OFF`、`query_only=ON`、`mmap_size=0`、`cell_size_check=ON`；
-- 禁止 load extension、ATTACH 任意路径、trigger/view 执行和 virtual table；收紧 length、SQL、column、expression depth、compound select、page/count 等 SQLite limits；
-- 在查询业务行前验证 cipher、application ID、portable schema fingerprint、精确表/列/index 集合和所有版本；
+- 在执行任何来自该 handle 的 Schema/业务 SQL 前，通过 C API 设置 `SQLITE_DBCONFIG_DEFENSIVE=1`、`SQLITE_DBCONFIG_ENABLE_TRIGGER=0`、`SQLITE_DBCONFIG_ENABLE_VIEW=0`，并设置 `trusted_schema=OFF`、`query_only=ON`、`mmap_size=0`、`cell_size_check=ON`；任一能力缺失或设置 read-back 不符即拒绝输入；
+- 禁止 load extension 和 virtual table；以 `sqlite3_limit(..., SQLITE_LIMIT_ATTACHED, 0)` 及 authorizer 拒绝 `ATTACH/DETACH`，并收紧 length、SQL、column、expression depth、compound select、page/count 等 SQLite limits；
+- 完成上述隔离后，先验证 cipher 和 `integrity_check`，再验证 application ID、portable schema fingerprint、精确表/列/index 集合和所有版本，最后才查询业务行；
 - 只用预编译 allowlist `SELECT` 按 keyset 读取，逐行做 TD-006 scalar、enum、长度、引用和资源验证；
 - 不对输入调用 backup API、`sqlcipher_export`、migration SQL 或写操作。
 
@@ -274,6 +278,7 @@ verified portable reader
 ```text
 1. bind authorization to:
      expectedActiveGenerationId + expectedDataMutationCounter
+     + current/targetNotificationDatasetEpoch
      + candidateGenerationId + candidateRootDigest
 2. fresh auth and user confirmation (restore/manual rollback)
 3. acquire exclusive DatasetGate; pause sync, reminder writes and cleanup
@@ -282,7 +287,8 @@ verified portable reader
 6. drain and close every DB connection, statement, cursor and attachment stream
 7. seal old and candidate DB: checkpoint/truncate, DELETE journal, FULL sync, close
 8. write control sequence N+1:
-     activeGeneration=candidate, previous=old, phase=validating
+     activeGeneration=candidate, previous=old, phase=validating,
+     notificationDatasetEpoch=target epoch
 9. reopen only candidate; run first-open self-test
 10. in candidate DELETE/FULL transaction write durable activation marker
     binding operationId, generationId and candidateRootDigest; close/read back
@@ -291,6 +297,8 @@ verified portable reader
 13. only now open Repository and accept business writes
 14. enqueue projection rebuild, notification force-reconcile, cleanup and cold-start check
 ```
+
+restore/manual rollback 的 target notification epoch 必须由步骤 4 重新读取的当前 control 做 checked increment；migration 保持 epoch。通知 response 只有在其 payload epoch 等于当前 active control 且 request ID 按该 epoch 重算一致时才可进入业务 action inbox。旧 epoch 的 pending/delivered 清理是隐私和容量收敛，不是安全正确性的前提。
 
 任何 SQLite 文件只在所有 handle 已关闭后变更 journal/清理 auxiliary file；不重命名活动数据库。activation marker 是防静默回滚边界：
 
@@ -305,7 +313,7 @@ verified portable reader
 
 成功 restore/migration 后 previous generation 及其 attachment root 使用当前设备加密保留。清理条件同时满足：
 
-- 从 `activatedAt` 起至少 7 个绝对 24 小时，且检测到系统时钟异常时只延后、不提前；
+- 从 `activatedAt` 起已满 7 个绝对 24 小时；检测到系统时钟异常时只延后、不提前；
 - 至少完成一次之后的冷启动自检；
 - 当前 active 已通过完整 gate；
 - 没有 backup/upload/restore/manual rollback lease；
@@ -412,7 +420,7 @@ SQLite 官方警告同文件多名、link 与 WAL/锁可能导致未定义行为
 - 至少需要一个受审原生 maintenance/control 模块和跨平台文件屏障实现；
 - migration/restore 需要额外约一份或多份数据库空间，低存储设备可能必须先清理空间；
 - 每个 Schema 字段都要维护 portable 分类、旧 reader、fixture 和 migration checksum；
-- previous generation/root 最多保留 7 天，会暂时增加占用；
+- previous generation/root 在 activation 后满 7×24 小时且完成一次后续冷启动自检时取得自动删除资格；若自检尚未完成可超过 7 天，会暂时增加占用；
 - 完整恢复前后需要多轮校验，最大数据集耗时明显，必须有进度/取消边界；
 - 系统通知等外部副本只能最终一致，不能纳入原子切换营销承诺。
 
@@ -426,13 +434,13 @@ SQLite 官方警告同文件多名、link 与 WAL/锁可能导致未定义行为
 | 新字段泄露到用户备份 | 覆盖式 table/column/JSON 分类；未知项阻止构建和备份。 |
 | control slot torn/corrupt | AEAD 双槽、sequence、屏障、read-back；两个都无效时阻断不猜。 |
 | 自动回旧 generation 丢新写入 | activation marker 后只能完成 active；Repository 在 active control 后才开放。 |
-| GC 删除备份/回滚所需附件 | active/previous/candidate/backup/upload 全部 root；expected identity 和 lease；安全年龄。 |
-| 恶意 SQLite 利用 Schema/parser | readonly NOFOLLOW、defensive/trusted_schema off、严格 limits/schema fingerprint、逐字段复制。 |
+| GC 删除备份/回滚所需附件 | active DB 动态 root + sealed previous/candidate/capture manifest + backup/upload/restore lease；expected identity 和安全年龄。 |
+| 恶意 SQLite 利用 Schema/parser | readonly NOFOLLOW、defensive/trusted_schema off、C API 禁 trigger/view/ATTACH、严格 limits/schema fingerprint、逐字段复制。 |
 | 迁移中磁盘满 | exact 预检 + 写中处理；candidate 可删、active 不变；不自动删权威数据。 |
 | 大迁移无限/重复 | keyset progress 与 batch 同事务；checksum/phase；从 candidate 重启安全。 |
 | manual rollback 丢激活后内容 | 影响预览、建议先备份、fresh auth、同步 gate、新 candidate；不直接改 pointer。 |
 | 时间回拨提前清 checkpoint | REC 时间异常只延后自动 GC；至少一次冷启动证据；用户删除需明确确认。 |
-| 旧通知动作作用于新数据集 | TD-009 当前状态/授权复核与幂等 inbox；切换后强制对账和 stale no-op。 |
+| 旧通知动作作用于新数据集 | restore/rollback 原子递增 `notificationDatasetEpoch`；TD-009 request ID/payload/current-control 校验；旧 epoch 永久 no-op，切换后再强制对账。 |
 
 ## Implementation constraints
 
@@ -483,11 +491,12 @@ SQLite 官方警告同文件多名、link 与 WAL/锁可能导致未定义行为
 ### 4. 恢复与恶意输入
 
 - portable schema 多/少表列、duplicate/错误类型、trigger/view/virtual table、超长值、深 JSON、巨大 page/count、恶意 record ID 和引用环；
-- `trusted_schema=OFF`、DEFENSIVE、NOFOLLOW、extension disabled 和 SQLite limits 在 release 二进制实测；
+- `trusted_schema=OFF`、DEFENSIVE、`ENABLE_TRIGGER=0`、`ENABLE_VIEW=0`、`SQLITE_LIMIT_ATTACHED=0`、authorizer、NOFOLLOW、extension disabled 和其余 SQLite limits 在 release 二进制实测；
 - Installation、keys、app lock、permission、session、BYOK、telemetry consent 不被备份覆盖；portable 偏好按字段恢复；
 - 10,000 附件/5 GiB root、缺失/损坏附件、restore re-encryption 任一点 kill、locator collision 和 GC lease；
 - preview 后当前 generation/counter 改变会要求重新确认，不能覆盖未预览变化；
 - switch 前所有失败当前 active 不变；validating 自检失败回旧；marker 后失败阻断/完成而不静默回旧；
+- 恢复/手动回滚 activation 前后构造旧 epoch delivered response，证明同业务 ID 也永久 no-op；migration 保持 epoch 且现有请求可按 fingerprint 收敛；
 - 恢复后 search/today/thumbnail 重建、TD-009 通知定向清理和强制重挂、过去提醒不补发、sync provenance/generation gate。
 
 ### 5. 安全和产物
@@ -529,4 +538,5 @@ previous generation 默认按 DATA-044 保留并允许用户提前清理。清�
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-26 | 区分 active 动态附件 root 与 sealed manifest；增加通知数据集 epoch；显式禁用不可信 SQLite trigger/view/ATTACH；统一回滚检查点自动删除资格。 |
 | 2026-07-26 | 接受 SQLCipher capture/export/portable 三路径、candidate-only migration、双槽 generation control、activation marker、不可信 portable reader 和多 root 附件协议。 |
