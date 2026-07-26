@@ -16,7 +16,7 @@ React Native 页面状态和普通键值存储无法提供这些事务/查询能
 
 ## Decision
 
-客户端使用 **SQLite + SQLCipher** 作为关系事实库，通过 `expo-sqlite` 的 CNG 配置在 iOS/Android 构建同一能力，并启用 FTS5。TypeScript 访问层采用 **Drizzle ORM 的 Expo SQLite driver** 处理表定义、类型化常规查询和迁移生成；迁移的权威产物是经过评审并带 checksum 的 SQL，关键事务、FTS、完整性、查询计划和 PRAGMA 可以通过封装后的原生 SQLite API 执行。
+客户端使用 **SQLite + SQLCipher** 作为关系事实库，通过 `expo-sqlite` 的 CNG 配置在 iOS/Android 构建同一能力，并启用 FTS5。TypeScript 访问层采用 **Drizzle ORM 的 Expo SQLite driver** 处理表定义、类型化常规查询和迁移生成；迁移的权威产物是经过评审并带 checksum 的 SQL，关键事务、FTS、完整性、查询计划和 PRAGMA 可以通过封装后的原生 SQLite API 执行。活动数据库不依赖可覆盖固定路径；Database Manager 必须先按 TD-010 解析受认证 `DatasetControlRecord`，再打开其中唯一的 active generation。
 
 数据库使用随机设备数据密钥，不使用用户口令直接作为 SQLCipher key。密钥解封由 TD-004 负责。应用以单一受控连接管理器打开数据库，P0 只有一个串行写连接；启用 `foreign_keys`、WAL 与 `synchronous=FULL`，所有用户输入使用绑定参数。数据库、WAL、SHM 和索引全部位于 App 私有且排除系统自动备份的目录。
 
@@ -45,7 +45,7 @@ SQLCipher 不受 Expo Go 支持，因此所有数据库测试在 Development Bui
 
 ### 2. 数据库位置与文件集
 
-- 主库使用固定内部逻辑名，不包含账号、标题或空间名；
+- 每个 generation 内数据库使用固定内部逻辑名 `database.sqlite`，generation 目录只使用受控不透明 ID，不包含账号、标题、空间名或时间；活动 generation 只由 TD-010 control 解析，不能扫描目录或按 mtime 猜测；
 - 放在 Application Support/No Backup 等平台等价私有目录；iOS 设置排除云备份资源属性，Android backup rules 排除主库、`-wal`、`-shm`、附件及密钥相关文件；
 - 数据库文件不进入系统文件选择器、分享面板、日志附件或崩溃报告；
 - WAL 与 SHM 是数据库持久状态的一部分，普通文件操作不得单独复制、删除或移动；
@@ -55,15 +55,19 @@ SQLCipher 不受 Expo Go 支持，因此所有数据库测试在 Development Bui
 ### 3. 打开和解锁顺序
 
 ```text
-取得数据库路径
-→ 从安全存储解封随机 DB key
+取得受控 no-backup 数据根
+→ 从安全存储解封 DatasetControlKey
+→ 认证并恢复双槽 DatasetControlRecord
+→ 解析唯一 activeGenerationId、activeKeyId 与 cipher profile
+→ 解封该 generation 的随机 DB key
+→ 构造并验证固定根内 canonical generation 路径
 → 打开 SQLCipher connection
 → 立即设置 raw hex key（不插入口令/用户输入）
 → 执行最小读取验证 key 与文件头
 → 读取 cipher/sqlite/compile 版本并验证 allowlist
 → 设置连接 PRAGMA
-→ 检查迁移标记、Schema 与完整性状态
-→ 执行受控迁移
+→ 检查 activation marker、迁移 ledger、Schema 与完整性状态
+→ 若需升级则关闭普通打开并交给 TD-010 candidate migration
 → 开放 Repository
 ```
 
@@ -72,6 +76,7 @@ SQLCipher 不受 Expo Go 支持，因此所有数据库测试在 Development Bui
 - key 只以固定长度字节/严格 hex 编码短暂进入 native boundary，不组成可记录的普通 SQL 字符串；
 - 数据库 key、`PRAGMA key`、完整 connection string 不得出现在日志、错误、analytics 或 crash breadcrumbs；
 - 在 key 验证和 Schema gate 完成前，任何业务 Repository 均不可取得 connection；
+- control 恢复必须先于普通数据库打开；slot 无效、冲突、引用缺失或 `phase=validating` 时只运行 TD-010 startup recovery，不得退回固定旧路径或创建空库；
 - “file is not a database”等底层结果不能直接告诉用户是口令错误还是损坏；恢复层根据已知操作上下文映射受控错误；
 - 失败时关闭 connection、清理 key buffer 能控制的副本，并保留原文件，不创建同名空库。
 
@@ -88,7 +93,7 @@ SQLCipher 不受 Expo Go 支持，因此所有数据库测试在 Development Bui
 | `PRAGMA secure_delete=ON` | 用户内容库启用并做性能验证。 | 永久清理后降低仍持 key 时从自由页恢复内容的机会；仍不替代 VACUUM/密钥销毁。 |
 | WAL auto-checkpoint | 从 SQLite 默认开始，按真实 WAL 大小/P95 调优。 | 避免拍脑袋固定页数；监测 checkpoint starvation。 |
 
-P0 使用一个长生命周期 connection 和进程内写队列，读事务不得跨页面等待、网络或渲染帧长期持有。增加第二 connection、后台 checkpoint 或并发 writer 前，必须验证实际链接 SQLite 已包含 WAL-reset 修复，并增加并发/崩溃测试。
+P0 对**当前 active generation** 使用一个长生命周期 connection 和进程内写队列，读事务不得跨页面等待、网络或渲染帧长期持有。TD-010 maintenance lease 可以为不同目标文件打开 capture/candidate 专用连接，但它们不能成为第二个 active writer，且 activation 前必须排空并关闭。增加同一 active generation 的第二 connection、后台 checkpoint 或并发 writer 前，必须验证实际链接 SQLite 已包含 WAL-reset 修复，并增加并发/崩溃测试。
 
 截至本决定日期，SQLite 官方披露 WAL-reset bug 在 3.51.3 及特定回移版本修复。生产构建必须核验实际版本/补丁：若未包含修复，只能保持单 connection、禁止并发 checkpoint/write，并在升级门替换；不能因发生概率低而忽略数据损坏风险。
 
@@ -122,7 +127,7 @@ P0 使用一个长生命周期 connection 和进程内写队列，读事务不�
 
 ### 8. 迁移协议
 
-数据库维护：
+数据库内对已完成/正在构建 candidate 的迁移证据至少包含：
 
 ```text
 schema_version
@@ -133,17 +138,17 @@ app_build
 state = applying | applied
 ```
 
-迁移规则：
+TD-010 接受后，所有已发布数据的 schema、data 和 cipher 迁移都遵循 `active → encrypted clone/capture → candidate transform → verify/seal → atomic activation`，不得在 active generation 原地执行。迁移规则：
 
 1. 编号只增不改；已发布 migration 内容与 checksum 不得改写；
-2. 迁移前验证 key、当前版本、剩余空间和上一迁移状态；
-3. 能单事务完成的 DDL/DML 在一个事务中执行；需要重建表/文件的迁移使用 checkpointed 多阶段状态和暂存对象；
+2. 候选构建前验证 active key、当前版本、剩余空间、内置 migration chain/checksum 和上一 candidate operation 状态；
+3. 能单事务完成的 DDL/DML 在 candidate 的一个事务中执行；需要重建表/文件的迁移使用 TD-010 checkpointed shadow 状态和稳定 keyset；
 4. 新增列先允许旧写入兼容，再回填/验证，最后在后续版本收紧约束；
 5. 删除/改义先双读或复制到新列，经历声明兼容窗口后才物理清除；
 6. FTS、今天、缓存、缩略图索引标为可重建，不通过复制旧错误投影完成迁移；
-7. 升级失败保留原库与诊断，不把半迁移库当空数据；
+7. 升级失败丢弃或隔离 candidate，保留 active 与无内容诊断，不把半迁移库当空数据；
 8. App 遇到更新 Schema 时进入受控“需要更新/只读恢复”状态，不尝试降级写入；
-9. SQLCipher major/cipher settings 迁移与业务 Schema 分开演练；`cipher_migrate` 只在明确检测旧格式时运行，检查返回值，不能每次打开执行。
+9. SQLCipher major/cipher settings 迁移与业务 Schema 分开演练；先从 active 得到隔离 capture，再以 `sqlcipher_export` 写新 key/settings candidate；`cipher_migrate` 只在明确检测受支持旧格式后作用于可丢弃隔离副本，检查返回值，不能在 active 或每次打开时执行。
 
 已发布版本不承诺原地 downgrade。回滚发布必须使用仍能读取当前 Schema 的前一兼容构建，或先有显式反向迁移/恢复方案。
 
@@ -222,7 +227,7 @@ FTS5 virtual table 与规范表位于同一个 SQLCipher 数据库，不创建�
 | SQLCipher/SQLite 大版本不兼容 | 记录实际版本和 cipher settings；旧格式 fixture、隔离迁移、备份往返和最低客户端门。 |
 | WAL-reset/其他上游缺陷 | 构建版本 allowlist、安全公告监测；单 writer/connection；升级后并发崩溃测试。 |
 | WAL 无限增长/磁盘耗尽 | 限制长读事务、观测 WAL、空闲 checkpoint、容量预检和 storage UI。 |
-| Drizzle 生成破坏性 SQL | 生成物只作候选；人工评审、checksum、旧 fixture 升级和 kill-point 测试。 |
+| Drizzle 生成破坏性 SQL | 生成物只作候选；只在 candidate generation 执行；人工评审、checksum、旧 fixture 升级和 kill-point 测试。 |
 | SQL 注入或敏感查询日志 | 全部绑定参数、列 allowlist、release 禁止 SQL 值日志、静态扫描。 |
 | OS 自动备份泄露/复制不一致 | iOS/Android 明确排除规则及安装包测试；只用产品加密备份。 |
 | 删除后自由页仍有内容 | secure_delete、受控 VACUUM、密钥销毁和物理取证测试；不作无法验证的瞬时擦除承诺。 |
@@ -230,6 +235,7 @@ FTS5 virtual table 与规范表位于同一个 SQLCipher 数据库，不创建�
 ## Implementation constraints
 
 - 数据库连接只能由 Database Manager 创建，业务模块不能自行 `openDatabase`；
+- Dataset Controller 是 active generation 的唯一解析者；Database Manager 不接受业务层路径，也不得在 control 解析前尝试旧固定路径；
 - Repository/UnitOfWork 不把 Drizzle/SQLite 类型或原始错误暴露给上层；
 - release 构建若 `useSQLCipher`、FTS5、foreign keys 或版本 allowlist 检查失败，启动进入阻断状态，不能降级明文；
 - 自动创建新库只允许确认路径不存在且初始化状态机合法；存在但打不开的文件一律保护；
@@ -249,7 +255,7 @@ FTS5 virtual table 与规范表位于同一个 SQLCipher 数据库，不创建�
 
 ### Reliability and migration
 
-1. 在每个 begin/write/task/migration/commit/checkpoint 点 kill，重启后只有旧状态或完整新状态；
+1. 在每个 candidate clone/begin/write/task/migration/commit/seal/control/activation-marker 点 kill，重启后只有旧 active 或 TD-010 已验证的新 active；
 2. 从每个已发布 Schema/cipher fixture 升级，checksum、行数、领域不变量和 FTS 一致；
 3. 错误 key、截断 DB/WAL、缺失 SHM、磁盘不足、迁移 SQL 失败时原文件保留且不创建空库；
 4. 新版 Schema 被旧版打开时只读阻断，不执行 downgrade 写；
@@ -278,4 +284,5 @@ FTS5 virtual table 与规范表位于同一个 SQLCipher 数据库，不创建�
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-26 | 对齐 TD-010：先解析 generation control、所有已发布迁移只在 candidate 执行、cipher 变化走隔离 export，并界定 maintenance connection。 |
 | 2026-07-26 | 接受 SQLite/SQLCipher、expo-sqlite、Drizzle、FTS5、单写连接、FULL WAL、迁移与完整性基线。 |
