@@ -1,6 +1,6 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.16 · 更新日期：2026-07-26 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.17 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
@@ -544,6 +544,7 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 | `notificationDatasetEpoch` | `NotificationDatasetEpoch` | 必填；只有等于当前 active control 的行才可能成为当前证据。 |
 | `attemptSequence` | `LongCounter` | 同一 ReminderInstance、installation/device、transport、platform、recipientSlot、epoch 和 platformRequestId 内从 1 递增；判断最新 attempt，不用设备时间排序。 |
 | `scheduleFingerprint` | ContentHash | 覆盖目标、内容策略、payload/category、隐私和精度；不保存可见文案。 |
+| `privacyIndependentFingerprint` | ContentHash | 覆盖除实际隐私模式及其派生文案/payload/category/action 之外的全部 replace 输入；只用于判断是否为纯隐私放宽，规范投影由 TD-009 唯一定义。 |
 | `effectivePrivacyMode` | `full \| title_only \| hidden` | 实际提交快照的隐私模式；可能因纯放宽而暂时比当前设置更严格。 |
 | `categoryContractId`、`categoryContractVersion` | 文本、正整数 | 实际提交的类别合同；hidden 使用 open_only v1。 |
 | `actionContractVersion`、`payloadContractVersion`、`requestIdentityContractVersion` | 正整数 | 实际提交的版本化合同。 |
@@ -559,7 +560,7 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 
 当前证据的唯一身份至少绑定 `(reminderInstanceId, installation/device slot, transport, platform, recipientSlot, notificationDatasetEpoch, platformRequestId, attemptSequence)`。同一身份的最新 attempt 必须 `status=accepted`，且 request ID、epoch、fingerprint、precision、environment generation、capability fingerprint 和 adapter contract 全部匹配当前输入；最新 requested/rejected/missing/cancelled 使较早 accepted 永久失效。本实体是 device-only 技术事实，不进入 portable backup。
 
-纯隐私放宽不得自动扩大已经交给平台的内容或动作：若没有其他 replace 原因，desired mapper 继续采用当前 accepted Delivery 的 `effectivePrivacyMode/category/action` 作为 `effectiveScheduledPresentationContract`，直到内容/时间/合同等自然重排或用户明确“更新已安排通知”。用户的明确更新选择必须成为绑定目标 input revision 的 device-only 耐久意图，经过成功 guarded publish 后才可清除，不能依赖一次内存事件。`open_only` 是任意仍获授权目标的严格只导航子集，来源后来变为非敏感时仍允许该旧 open response 在 fresh Lease B 下导航，但绝不能恢复来源类别 mutating action。隐私收紧时先清旧内容快照；只有收紧后的当前有效呈现合同已经撤销旧 category/action（例如转为 hidden/open_only）时，清理前到达的旧动作才只能 `business_noop`。仅 `full→title_only` 且 category/action 未变时仍按 fresh Lease B 的当前授权和状态执行，不能把文案收紧误当作动作撤权。
+纯隐私放宽不得自动扩大已经交给平台的内容或动作：若当前 desired 与 matching accepted Delivery 的 `privacyIndependentFingerprint` 相同且没有 force marker，desired mapper 继续采用该 Delivery 的 `effectivePrivacyMode/category/action` 作为 `effectiveScheduledPresentationContract`，直到其他 replace 输入改变或用户明确“更新已安排通知”。用户的明确更新选择必须成为绑定目标 input revision 的 device-only 耐久意图，经过成功 guarded publish 后才可清除，不能依赖一次内存事件。`open_only` 是任意仍获授权目标的严格只导航子集，来源后来变为非敏感时仍允许该旧 open response 在 fresh Lease B 下导航，但绝不能恢复来源类别 mutating action。隐私收紧时先清旧内容快照；只有收紧后的当前有效呈现合同已经撤销旧 category/action（例如转为 hidden/open_only）时，清理前到达的旧动作才只能 `business_noop`。仅 `full→title_only` 且 category/action 未变时仍按 fresh Lease B 的当前授权和状态执行，不能把文案收紧误当作动作撤权。
 
 ### 14.4 `NotificationActionInbox`
 
@@ -1090,6 +1091,7 @@ StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.17 | 2026-07-26 | 为 NotificationDelivery 增加隐私无关 replace 指纹，使纯隐私放宽可跨崩溃确定比较。 |
 | v1.16 | 2026-07-26 | 固定 NotificationInputRevision 上限时业务写与已发生外部能力变化的不同 fail-closed 处理。 |
 | v1.15 | 2026-07-26 | 增加 ActionInbox stale_noop 与可恢复 claim 状态机，耐久化明确的隐私放宽刷新意图，并区分文案收紧与动作撤权。 |
 | v1.14 | 2026-07-26 | 统一提醒对账的唯一输入修订护栏，并明确 sealed SchedulingRun 仅允许 phase 进入发布或丢弃终态。 |
