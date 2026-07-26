@@ -24,9 +24,14 @@
 ```text
 OS Keychain / Android Keystore
         └── Device Wrapping Key (DWK, this-device-only)
-                ├── wraps Database DEK
-                ├── wraps Attachment Root Key
+                ├── wraps DatabaseDataKey
+                ├── wraps AttachmentRootKey
+                ├── wraps DatasetControlKey
                 └── wraps other device-local secrets by purpose
+
+Backup operation (separate; never wrapped/derived by DWK)
+        passphrase → PassphraseWrappingKey → wraps BackupRootKey
+        BackupRootKey → HKDF purpose keys → wraps SnapshotDataKey slot
 
 System Local Authentication
         └── grants in-memory AppLockSession / FreshAuthGrant
@@ -46,11 +51,14 @@ System Local Authentication
 | `DeviceWrappingKey` | 每次有效本地数据生命周期随机创建；Keychain/Keystore，this-device-only。 | 包装设备本地 DEK/根密钥。 | 直接加密数据库页、附件或备份；同步到账号。 |
 | `DatabaseDataKey` | 256-bit 随机；仅以 envelope 持久化。 | SQLCipher raw key。 | 附件、备份、API token。 |
 | `AttachmentRootKey` | 256-bit 随机；仅以 envelope 持久化。 | 派生/包装每附件独立 key。 | 数据库、备份容器。 |
-| `BackupKey` | 由独立备份口令和每备份随机 salt 派生。 | 单个 `.lifebook` 容器。 | 设备数据库/附件在线解锁。 |
+| `DatasetControlKey` | 256-bit 随机；由 DWK 包装，仅以 envelope 持久化。 | 认证加密 TD-010 双槽 `DatasetControlRecord`。 | 数据库页、附件、备份、普通设置。 |
+| `PassphraseWrappingKey` | TD-011 规范化口令 + 每备份 salt 经固定 Argon2id 派生；operation-scoped。 | 只包装该容器随机 `BackupRootKey`。 | 设备 envelope、manifest/payload 直接加密、持久化。 |
+| `BackupRootKey` / purpose keys | 每备份随机 root；TD-011 HKDF 派生 manifest、payload、key-slot keys。 | 单个 `.lifebook` 容器。 | 设备在线解锁、跨备份复用、进入 JS/Keychain。 |
+| `SnapshotDataKey` | TD-010 请求 Key Manager 每备份随机生成；operation/session-scoped opaque handle。 | 只加密 portable SQLCipher DB，并由 TD-011 key slot 包装。 | 活动数据库、附件、脱离 session 保存或复用。 |
 | `AppLockSession` | 系统认证成功后在内存创建。 | 允许前台内容查询/呈现。 | 加密数据、跨进程持久化、证明账号身份。 |
 | `FreshAuthGrant` | 高风险动作前系统认证；operation-scoped。 | 提交指定高风险命令。 | 作为通用长期登录或跨设备授权。 |
 
-每个 envelope 至少包含格式版本、key purpose、key ID、包装算法版本、nonce/IV、密文、认证标签和创建时间；不包含用户内容。envelope 存在数据库外的私有元数据文件，采用临时文件 + fsync/平台等价 + 原子替换，并保留双槽/恢复标记以支持 rewrap 中断。
+本节 envelope 格式只指 **DWK 包装的设备本地 key envelope**：至少包含格式版本、key purpose、key ID、包装算法版本、nonce/IV、密文、认证标签和创建时间，不含用户内容；位于数据库外私有元数据，采用临时文件 + fsync/平台等价 + 原子替换，并保留双槽/恢复标记以支持 rewrap 中断。TD-011 公共头的 `rootKeyEnvelope` 和加密 manifest 内的 SnapshotDataKey slot 由 container-v1 唯一规定，不复用本设备 envelope 格式。
 
 ### 2. 平台实现
 
@@ -76,9 +84,11 @@ System Local Authentication
 
 ### 3. 原生 Key Manager 边界
 
-- Key 生成、wrap/unwrap、envelope 原子替换和数据库/附件 key handle 位于受审查的原生 Key Manager；
-- JS 层只持有不透明 handle、授权 capability 和受控错误，不读取 DWK 或长期保存 raw DEK；
+- Key 生成、wrap/unwrap、设备 envelope 原子替换和数据库/附件/数据集控制 key handle 位于受审查的原生 Key Manager；
+- Key Manager 为 TD-010 生成 operation-scoped `SnapshotDataKeyHandle`，为 TD-011 second-pass session 接收其解封的同类 handle；session terminal 后销毁，不能转换为普通设备 envelope；
+- JS 层只持有不透明 handle、授权 capability 和受控错误，不读取 DWK、`DatasetControlKey`、任何 raw DEK 或备份 operation key；
 - Database Adapter 使用 handle 在原生边界给 SQLCipher 设置 key；Attachment Adapter 使用独立 handle 执行流式 AEAD；
+- Dataset Control Adapter 只能用 `DatasetControlKeyHandle` 认证/解密受控 slot DTO，不提供任意 AEAD oracle；Backup Container Adapter 只能按 TD-011 固定 suite 使用 operation handle；
 - 若底层第三方 API 暂时要求 key bytes 穿过 JS，该实现不得进入 production gate；先补原生窄模块，而不是用不可擦除字符串长期持有；
 - 内存清零为 best effort，不能声称能消除运行时、交换区或已被攻陷进程的全部副本；主要控制是缩短生命周期、限制边界和禁止日志。
 
@@ -142,9 +152,9 @@ Application use case 必须显式要求 capability，不能用全局 `isUnlocked
 ```text
 创建 initializing marker
 → 创建 DWK
-→ 生成 DB/Attachment keys
+→ 分别生成 DatabaseDataKey / AttachmentRootKey / DatasetControlKey
 → 写并验证 envelopes
-→ 创建加密数据库/附件根
+→ 创建加密数据库/附件根/初始双槽 DatasetControlRecord
 → 提交 initialized marker
 ```
 
@@ -152,7 +162,9 @@ Application use case 必须显式要求 capability，不能用全局 `isUnlocked
 
 #### 产品备份恢复
 
-备份从 BackupKey 解密到隔离区，通过完整性/迁移后，使用**接收设备当前或新生成的 DB/Attachment keys**重新加密。备份不会恢复原设备 DWK、DEK、应用锁 session、生物注册或系统权限；应用锁设置只按 DATA-045 的设备语义处理。
+恢复入口是 TD-011 pass 1 完整认证后产生的 `VerifiedBackupHandle`，不是 `BackupKey` 或明文目录。TD-010 用该 handle 开启一次性 pass 2；session-scoped `SnapshotDataKeyHandle` 只打开受控 portable SQLCipher staging，认证附件流直接由 TD-005 用**接收设备当前或新生成的 DatabaseDataKey/AttachmentRootKey**重加密到可丢弃 candidate。只有 `Pass2CompletionEvidence`、portable defensive validation 和 candidate seal 全部通过，TD-010 才能执行原子 activation。
+
+恢复不会导入、替换或重新派生接收设备的 DWK、`DatasetControlKey`、AppLockSession、FreshAuthGrant、账号会话、生物注册、系统权限或平台调度 ID。候选 generation 使用接收设备 key hierarchy；应用锁设置只按 DATA-045 的设备语义处理。任何 pass/candidate 失败只删除 staging，不能触碰当前 active key/envelope/control slot。
 
 #### 密钥丢失/失效
 
@@ -169,8 +181,9 @@ Application use case 必须显式要求 capability，不能用全局 `isUnlocked
 
 - envelope、DWK、DEK 和算法分别有版本；App 启动只读取当前受支持组合；
 - 常规设备包装策略升级优先生成新 DWK、重新包装现有 DEK，验证双槽后删除旧 wrapper，无需重加密全部内容；
-- DB DEK 轮换使用 SQLCipher 受控 rekey/隔离复制、完整性检查和 crash recovery；不能直接覆盖活动文件；
+- DB DEK/cipher 轮换只能按 TD-010 在隔离 candidate generation 使用受控 `sqlcipher_export`/等价复制、完整性检查和 atomic activation；不得对 active generation 原地 `rekey`、覆盖或 rename；
 - AttachmentRootKey 轮换由 TD-005 的 per-file key envelope 渐进完成；旧 key 在全部引用迁移前保留受控读取；
+- DatasetControlKey 轮换必须生成新 key/envelope、以更高 control sequence 双写并 read-back 验证两个 control slot/引用 generation 后切换；任一时刻启动恢复都能选择一个完整受认证记录，不能先销毁旧 key；
 - 清除本机按 DATA-091：先记录不可逆 clear marker、取消通知、关闭 DB、删除活动/临时数据，再销毁 keys；崩溃重启发现 marker 时继续清除，不能初始化空库并遗留旧密文；
 - 卸载后的 App 私有数据/Keychain/Keystore 行为由平台控制，产品不依赖卸载完成外部备份删除。
 
@@ -245,18 +258,19 @@ App 无法读取设备密码；自定义 PIN 熵低且需要找回/限次/迁移
 
 ### Key lifecycle matrix
 
-两平台最低支持和主流真机覆盖：首次创建、正常重启、进程 kill、设备重启前/后首次解锁、系统升级、App 升级、关闭/开启应用锁、添加/移除生物特征、改变/移除设备凭据、Biometric lockout、Keystore/Keychain 返回各错误、磁盘满、envelope 截断和轮换每个 kill point。
+两平台最低支持和主流真机覆盖：首次创建 DB/Attachment/DatasetControl 三类 key、正常重启、进程 kill、设备重启前/后首次解锁、系统升级、App 升级、关闭/开启应用锁、添加/移除生物特征、改变/移除设备凭据、Biometric lockout、Keystore/Keychain 返回各错误、磁盘满、device envelope/control slot 截断和每种轮换 kill point。
 
 通过标准：
 
 1. 正常场景同一数据可解密；错误场景不产生空库/第二身份；
-2. key/envelope/原文不进入日志、崩溃、备份、剪贴板或 JS 可枚举全局；
-3. 复制 DB/附件/envelope 到另一设备或普通工具不可读取；
+2. raw/unwrapped key、设备本地 envelope 和 plaintext 不进入日志、崩溃、`.lifebook`、剪贴板或 JS 可枚举全局；容器只允许 TD-011 定义的 wrapped BackupRootKey envelope 与 wrapped SnapshotDataKey slot；
+3. 复制 DB/附件/设备 envelope/control slot 到另一设备或普通工具不可读取，跨 purpose 替换 Database/Attachment/DatasetControl envelope 必须认证失败；
 4. App Lock 开启后，进程重启、深链接、通知和后台返回都先经过安全门；
 5. 背景任务只能执行 allowlist 能力，测试无法经它返回记录 DTO；
 6. FreshAuthGrant 过期、后台、目标/摘要变化、重复使用时被拒绝；
 7. 凭据永久不可用时只有备份恢复/清除路径，不存在隐藏旁路；
 8. 清除本机在任一 kill point 后最终同时清除数据和 keys，再创建唯一空空间。
+9. TD-011 两遍恢复及其任一失败不改变接收设备 DWK、DatasetControlKey、AppLock/session、权限或账号状态，SnapshotDataKey handle 在 session terminal 后不可再用。
 
 ### Security review
 
@@ -280,4 +294,5 @@ App 无法读取设备密码；自定义 PIN 熵低且需要找回/限次/迁移
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-26 | 加入 DatasetControlKey，移除单一 BackupKey，按 TD-011 分离备份 root/用途 key/SnapshotDataKey，并固定两遍恢复不改变接收设备 key hierarchy。 |
 | 2026-07-26 | 接受随机分层密钥、this-device-only 包装、原生 Key Manager、应用锁 session 和操作级近期认证。 |
