@@ -1,6 +1,6 @@
 # 生活有谱提醒与系统通知规范
 
-> 项目代号：`life-book` · 版本：v1.10 · 更新日期：2026-07-26 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.11 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：提醒计划、提醒实例、系统调度、通知动作、去重、权限、降级和可靠性边界
 >
@@ -305,7 +305,7 @@ payload 的交叉字段合同为：`sourceType=hidden` 当且仅当 `categoryCon
 - `actionInboxId` 由 TD-009 的版本敏感规范 hash 生成，必须绑定 transport、platform request identity、category/action/payload/request identity 合同版本和用户实际 action；任一 transport 或语义版本改变都不得命中旧 inbox 幂等结果。Inbox 只保存 allowlist 字段与受控结果码，不保存 raw payload、title/body 或任意原生 metadata。
 - P0 所有完成、跳过、知道了、稍后和加入采购清单等改变领域状态的快捷动作都只打开 App；平台认证/破坏性标记只作附加防护，不能成为执行授权。
 - 等待 SCR-002 应用锁或用户交互期间不得持有 DatasetReadLease。解锁后、读取目标前取得绑定 then-active generation + epoch 的 fresh `DatasetReadLease B`；暂时无法取得 Lease B 时 inbox 保持 `pending` 并 defer，不得误标 stale。取得后重新验证 inbox epoch、完整 request identity、category/action 合同、当前空间授权和最新来源状态。
-- fresh Lease B 下 epoch 或 request identity 已改变时，结果是终态 `stale_noop`，不读取或缓存目标；identity 仍 current 但 membership/授权、来源、动作或 category 语义已不允许时，在短事务将 inbox 消费为 `business_noop`。两类结果不得互相代替。
+- fresh Lease B 下先在 then-active Repository 查找同 epoch inbox。dataset 已替换、row 缺失或 epoch 不匹配时直接 targetless no-op，不读取 previous dataset、也不在 target 伪造 inbox；同 epoch row 存在时才 claim。随后 request identity 已改变才落终态 `stale_noop`，不读取或缓存目标；identity 仍 current 但 membership/授权、来源、动作或 category 语义已不允许时，在短事务将 inbox 消费为 `business_noop`。三类结果不得互相代替。
 - mutating action 在 Lease B 下以单一领域事务消费 inbox、写业务 mutation/幂等结果和后续 input revision/reconcile task；提交前 epoch/lease 变化则整体回滚。默认 `open` 不持久化解析目标：router 只接收在 Lease B 下重新生成、以 `actionInboxId` 作为幂等身份的 `NavigationIntent`，在紧邻导航前验证并将 inbox 置 `applied`。即使响应已处理，重放也必须再取 fresh Lease B，不能复用旧目标缓存。
 - 敏感通知只显示“打开”，不在锁屏提供其他动作；通知 payload 不包含敏感内容。
 - 动作回调验证 category/action contract ID 与版本、实例、来源当前状态和幂等键，不能信任客户端按钮名称。
@@ -319,7 +319,7 @@ ActionInbox 的可恢复执行状态机固定为：取得 Lease B 后，processo
 - 已解决低库存收到加入采购：打开当前物品状态，不创建过时项目。
 - 已删除/永久删除来源收到任何动作：返回不可用，清理残留系统通知。
 - 同一动作被 iOS/Android 重放只执行一次。
-- Lease A 发现 old、missing、malformed 或 future dataset epoch 时不创建 ActionInbox、不更新 Delivery、不打开目标、不产生 mutation；最多打开无目标首页，清除 last response 并定向清理对应通知。Lease A 后 dataset 才切换的已入箱响应由 fresh Lease B 归类为终态 `stale_noop`，不访问 previous dataset。
+- Lease A 发现 old、missing、malformed 或 future dataset epoch 时不创建 ActionInbox、不更新 Delivery、不打开目标、不产生 mutation；最多打开无目标首页，清除 last response 并定向清理对应通知。Lease A 入箱后 dataset 才切换时，target 不导入旧 inbox；fresh Lease B 的 current lookup 缺失即 targetless no-op，不访问 previous dataset，也不伪造 `stale_noop` row。同 epoch request identity 后来改变时才在现有 inbox 上落 `stale_noop`。
 - current-epoch response 在入箱后若来源已经终态、删除、失权或动作过期，以 `business_noop` 完成并返回当前状态；不能回退执行旧语义。
 - control 为 `validating`、integrity-blocked 或 Repository 未开放时，语法合法但尚不能分类的 response 标记瞬时 `deferred_unclassified`：只做 bounded parse 和平台要求的 completion acknowledgement，不入箱、不写 App 明文暂存、不清 last response/目标通知、不导航。notification subsystem 第一次重新进入 active 必须主动 re-fetch 平台 last response 并从 bounded parse 重跑；平台 adapter 不保证保留时只能进入无目标首页并记录无内容诊断，不得伪装成 `business_noop`。
 
@@ -661,9 +661,9 @@ P1 远程推送用于：
 - 同业务 ID 跨 epoch 或 transport 的 platformRequestId 必须不同；old/future/missing/malformed epoch 不能入箱、导航目标或执行命令；
 - 相同 epoch/request/category/action/payload 但不同 categoryContractVersion 必须得到不同 actionInboxId；旧版本只按旧 allowlist 解释；敏感 `open_only` 不能接受来源类别动作；
 - 分别改变 category/action/payload/requestIdentityContractVersion，验证 actionInboxId 均不同；穷举 `hidden/open_only/version/sourceId/spaceId/actionId` 交叉组合，只允许 REM-060 规定的组合入箱；
-- callback 在 control 切换前、validating 中和 phase=active 后到达，以及 inbox 已写但 command 未执行时 activation 取得 gate；结果只能完整旧事务、`deferred_unclassified`、终态 `stale_noop`、完整 current 事务或 current `business_noop`，绝不出现半事务；
+- callback 在 control 切换前、validating 中和 phase=active 后到达，以及 inbox 已写但 command 未执行时 activation 取得 gate；结果只能完整旧事务、`deferred_unclassified`、dataset 替换后的无 row targetless no-op、同 epoch `stale_noop`、完整 current 事务或 current `business_noop`，绝不出现半事务；
 - parser Lease A 入箱后立即释放；模拟任意长锁屏等待及期间 dataset replacement，fresh Lease B 必须阻止旧目标导航/mutation，activation gate 不被用户等待占用；
-- Lease B 暂时不可用时 inbox 保持 pending；取得后分别验证 epoch/request 变化只得 `stale_noop`，identity current 但失权/来源终态/动作过期只得 business_noop；在 claim 后、领域提交前后及导航接受前后逐点 kill，跨进程 session 回收、同进程 watchdog 与 retry task 必须最终收敛且业务动作至多一次；
+- Lease B 暂时不可用时 inbox 保持 pending；取得后 dataset/epoch 已替换或 current row 缺失只得无 row targetless no-op，同 epoch request identity 变化只得 `stale_noop`，identity current 但失权/来源终态/动作过期只得 business_noop；在 claim 后、领域提交前后及导航接受前后逐点 kill，跨进程 session 回收、同进程 watchdog 与 retry task 必须最终收敛且业务动作至多一次；
 - `open` 成功后不存目标、inbox 置 applied；重放必须重取 Lease B，不得复用 NavigationIntent 或绕过当前授权。validating 期间不写明文/不清 last response，首次 active 必须 re-fetch 重跑；
 - 纯隐私放宽保留更严格 effective contract 与 open-only 导航，不恢复 mutating action；明确 refresh marker 在平台调用/receipt/publish 各点崩溃后仍保留并最终清除。隐私收紧仅在新合同撤销旧 category/action 时使旧动作 business_noop；full→title_only 且动作合同未变仍可通过 fresh Lease B；
 - stale pending/delivered 清理失败仍不能赋予旧 response 动作权限；
@@ -714,6 +714,7 @@ P1 远程推送用于：
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.11 | 2026-07-26 | 区分 dataset replacement 后旧 inbox 不可见的 targetless no-op 与同 epoch request 变化的 stale_noop。 |
 | v1.10 | 2026-07-26 | 将 TD-009 的 privacyIndependentFingerprint 纳入逐次 Delivery 证据，支持隐私放宽的跨崩溃确定比较。 |
 | v1.9 | 2026-07-26 | 增加 transport 隔离身份、ActionInbox 可恢复状态机、耐久隐私刷新意图、精确 dedup hash、revision 耗尽和完整 restore 初始化合同。 |
 | v1.8 | 2026-07-26 | 统一对账只使用 NotificationInputRevision 作为业务与设置输入的并发护栏，并明确 sealed run 的合法 phase 终态迁移。 |
