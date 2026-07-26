@@ -5,7 +5,7 @@
 > Decision owners：客户端数据负责人、安全负责人  
 > Scope：P0～P2 移动端附件字节、缩略图、临时文件、完整性和清理  
 > Related requirements：PR-105、PR-500、领域模型 §7.3、BR-023～024、DATA-012、DATA-020～022、DATA-082、DATA-122、QR-012、QR-020、QR-070、QR-100～101  
-> Related ADRs：[TD-003](0003-encrypted-local-database.md)、[TD-004](0004-device-key-hierarchy-and-app-lock.md)、[TD-011](0011-backup-container-and-cryptography.md)、[TD-021](0021-cloud-attachment-and-backup-transfer.md)  
+> Related ADRs：[TD-003](0003-encrypted-local-database.md)、[TD-004](0004-device-key-hierarchy-and-app-lock.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、[TD-011](0011-backup-container-and-cryptography.md)、[TD-021](0021-cloud-attachment-and-backup-transfer.md)
 > Decision gate：原生密码库、安全评审、恶意文件、崩溃/空间不足和 50 MB 流式真机测试通过后才能开放附件
 
 ## Context
@@ -159,16 +159,18 @@ reserved
 
 - Record 移到回收站时附件关系和密文保留，供 30 天恢复；
 - 普通“移除附件”先删除可见关系并保留撤销状态，撤销窗口结束后持久任务检查所有引用；
-- 只有引用计数为零、没有 active operation/备份读取 lease/上传读取 lease 时才能删除密文和 key envelope；
+- active generation 中所有仍需保留字节的 locator-bearing `Attachment` 行是当前动态 GC root，包含权威原附件和仍被引用的派生缩略图；candidate/capture 和 active 即将变为 previous 时，由 TD-010 在写 gate 内生成受认证、冻结的 locator + expected ciphertext identity manifest；
+- 只有 active 动态 root、sealed previous/candidate/capture manifest 以及 backup/restore/upload/导入 operation lease 都不引用时，才能删除密文和 key envelope；activation 时的 candidate root 不能在开放业务写入后代替 active 动态 root；
 - 永久 purge 在数据库事务移除关系/元数据并写 `DeleteAttachmentBytes(locator, expectedHash)` 任务；任务重复执行视“文件已不存在”为成功，但 locator/hash 不匹配时停止并隔离；
 - 删除 thumbnail 不影响原件；删除原件同时排队其派生缩略图；
-- orphan scanner 只遍历受控 attachments 子目录，对比 operation/metadata，设至少 24 小时安全年龄，绝不删除刚完成但事务尚未提交的文件；
+- orphan scanner 只遍历受控 attachments 子目录，对比全部动态/冻结 root 和 operation lease，设至少 24 小时安全年龄，绝不删除刚完成但事务尚未提交、备份正在读取或回滚检查点仍保留的文件；
 - 失败清理可重试并显示存储仍占用，不把删除失败恢复成业务 Attachment。
 
 ### 10. 备份、恢复与同步
 
-- P0 备份通过授权解密流读取正文，再由独立 BackupKey 加密进入容器；不得把设备 FileDataKey/ARK 原样放进备份；
-- 恢复在隔离区验证备份 auth/hash 后生成接收设备的新 FileDataKey/密文，最后与数据库原子切换；
+- P0 备份在 TD-010 snapshot attachment lease 下，通过授权解密流读取**权威原附件明文**并直接送入 TD-011 独立备份密钥保护的载荷流；容器不得包含设备密文、FileDataKey/ARK envelope、storage locator 或内部路径；
+- 缩略图是派生附件，不进入 portable DB 或备份载荷；projector 删除其 Attachment 行并清空原附件的 `thumbnailAttachmentId`，恢复 activation 后排队重建；
+- 恢复在隔离区验证备份 auth/hash 后为每个原附件生成接收设备的新 FileDataKey、envelope、locator 和密文，置于 candidate root lease；TD-010 只有在 candidate 数据库与附件 root 全部验证后才原子切换逻辑数据集；
 - 导出是明确的未加密副本，走临时明文规则和风险确认；
 - P1 上传/下载协议由 TD-021 决定，不能默认把设备私有密文直接当跨设备格式；
 - OQ-006 未关闭前，设备静态加密不等于云端 E2EE，也不把 ARK 上传服务端；
@@ -224,7 +226,7 @@ reserved
 | --- | --- |
 | nonce/key/stream 使用错误 | 只用 libsodium keygen/secretstream/AEAD API；固定格式；独立密码学评审和 tamper fixtures。 |
 | 恶意 provider 虚报大小/MIME | 流式硬上限、内容 sniffing、decoder limit、取消并删暂存。 |
-| 崩溃留下 orphan/半状态 | 持久 operation、fsync+atomic rename、重启状态机、24h 安全年龄。 |
+| 崩溃留下 orphan/半状态 | 持久 operation、fsync+atomic rename、重启状态机、全 generation/lease root 集合、24h 安全年龄。 |
 | path traversal/symlink 误删 | 随机 locator、根目录 canonical 验证、单文件 API、拒绝用户路径和软链接。 |
 | 临时明文泄露 | 仅显式操作、complete protection/no-backup、短 TTL、锁定清理、无内容文件名。 |
 | 缩略图泄露敏感内容 | 独立加密；锁定查询不解密；截图/可访问树用通用占位。 |
@@ -256,7 +258,8 @@ reserved
 
 - provider 取消/权限撤销、读中断、磁盘满、fsync/rename/DB commit 失败、App 在每阶段被杀；
 - 多附件事务只有全部关系或一个都没有；orphan 在安全窗口后清理，刚提交文件不误删；
-- record trash/restore/purge、附件 remove/undo/copy、thumbnail corrupt/rebuild、backup/restore 往返；
+- record trash/restore/purge、附件 remove/undo/copy、thumbnail corrupt/rebuild、backup/restore 往返；portable 备份没有 thumbnail 行/字节且恢复后可重建；
+- active 新增/移除附件与 GC 并发，previous/candidate/capture/backup/restore/upload root/lease 保留期间不得误删，释放最后 root 后才可按安全年龄清理；
 - 锁屏/后台/截屏时敏感图片不从 UI、可访问树或明文缓存泄露；
 - iOS backup exclusion 在 rename 后仍为 true，Android cloud/D2D 规则都排除；
 - path traversal、symlink、恶意 MIME/图片尺寸、压缩炸弹和随机 private directory 文件不会越界读/删。
@@ -283,4 +286,5 @@ reserved
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-26 | 对齐 TD-010/011：区分 active 动态 root 与 sealed generation manifest，补齐全部 GC lease，并冻结 portable 原附件重加密与缩略图重建规则。 |
 | 2026-07-26 | 接受 per-file key、secretstream 256 KiB 分块、加密暂存/原子提升、独立缩略图和可恢复 GC。 |
