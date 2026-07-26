@@ -1,6 +1,6 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.13 · 更新日期：2026-07-26 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.14 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
@@ -610,7 +610,7 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 | `reasonCode` | 受控无内容码? | 解释阻断/失败，不保存平台原始消息。 |
 | `requestedPrecision` | `exact \| approximate \| not_applicable` | 与当前候选或失败尝试一致。 |
 | `environmentGeneration` | 非负整数 | 与本轮固定平台环境一致。 |
-| `inputFingerprint` | `ContentHash` | 覆盖 active generation/epoch、domain/settings revision、capability/environment、tzdb/engine/adapter 合同等最终 CAS guards。 |
+| `inputFingerprint` | `ContentHash` | 覆盖 active generation/epoch、`NotificationInputRevision`、capability/environment、tzdb/engine/adapter 合同等最终 CAS guards；不得另造含义重叠的 domain/settings 全局 revision。 |
 | `computedAt` | `Instant` | 诊断时间，不用于决定发布先后。 |
 
 唯一键为 `(installationId, notificationDatasetEpoch, notificationInputRevision, transport, platform, recipientSlot, reminderInstanceId, reconciliationRunId)`。`eligible_selected` 表示最终选择未被能力/预算/错误阻断；平台已经 accepted 时仍以 Delivery 作为更强单条证据，平台 retryable/terminal 失败则 Decision 必须改为相应 error。实现可预写 building run rows，但只有所属 run 完整 sealed 且 ReconciliationState 的最终 guard-CAS 发布相同 run，行才成为 current projection。
@@ -631,7 +631,7 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 | `decisionSetHash` | `ContentHash?` | sealed 起必填；对按 `(recipientSlot, reminderInstanceId)` ASCII 稳定排序的规范 Decision 投影计算。 |
 | `builtAt`、`sealedAt`、`publishedAt` | `Instant?` | 仅用于诊断，不决定顺序。 |
 
-seal 短事务必须同时验证同 run 行数恰等于 `expectedDecisionCount`、每个候选恰一行且规范集合 hash 匹配；sealed 后 header 和 Decision 行不可修改。最终 guard-CAS 在同一事务把 run 从 sealed 改 published，并设置 ReconciliationState.publishedRunId；guard 变化则改 discarded 并重排。building 崩溃行、未被指向的 sealed run 和 discarded run 永不可见，可在安全保留期后回收。
+seal 短事务必须同时验证同 run 行数恰等于 `expectedDecisionCount`、每个候选恰一行且规范集合 hash 匹配；sealed 后除 `phase` 的合法终态迁移外，header 其他字段和全部 Decision 行不可修改或删除。最终 guard-CAS 在同一事务把 run 从 sealed 改 published，并设置 ReconciliationState.publishedRunId；guard 变化则把 sealed run 改 discarded 并重排。building 崩溃行、未被指向的 sealed run 和 discarded run 永不可见，可在安全保留期后回收。
 
 ### 14.7 `NotificationReconciliationState`
 
@@ -1085,6 +1085,7 @@ StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.14 | 2026-07-26 | 统一提醒对账的唯一输入修订护栏，并明确 sealed SchedulingRun 仅允许 phase 进入发布或丢弃终态。 |
 | v1.13 | 2026-07-26 | 增加 NotificationInputRevision、完整 sealed SchedulingRun/Decision 发布、fresh action lease、有效呈现合同、确定性恢复优先级和 P1 ReminderDeliveryAggregate，并校正 ExactDecimal 值域。 |
 | v1.12 | 2026-07-26 | 增加 NotificationDatasetEpoch、ActionInbox、ReconciliationState、同 epoch Delivery 证据和激活门事务不变量，并固定恢复后的提醒状态规范化。 |
 | v1.11 | 2026-07-26 | 纳入 TD-007 历史时间解析证据，并统一 ReminderInstance 收件人范围状态、逐设备 NotificationDelivery 字段与平台证据语义；同步修正页首版本。 |
