@@ -1,0 +1,790 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:life-book:backup:manifest:1",
+  "title": "Life Book encrypted backup manifest v1",
+  "description": "Authenticated canonical manifest for .lifebook containerFormatVersion 1. The plaintext must additionally be RFC 8785 JCS and satisfy the runtime invariants declared below.",
+  "$comment": "Parser budgets: plaintext <=16777216 bytes; depth <=32; tokens <=200000; object properties <=100000; every instance string <=4096 UTF-8 bytes; members <=10016; root extensions <=16 and their JCS array <=65536 bytes. Runtime invariants: (1) authenticate XChaCha20-Poly1305 before materializing JSON; reject duplicate properties, invalid UTF-8, BOM, non-JCS bytes, impossible Gregorian instants, and unknown required features; (2) containerFormatVersion, suiteId, and decodeHex(containerId) equal the authenticated header, and plaintext length + 16 equals header manifestCiphertextLength; (3) portableDatabase identifies the unique database member and its slot AAD/key/cipher profile/schema/hash/length satisfy container-v1 and the defensive portable reader; (4) members are strictly sorted by numeric typeCode then memberId ASCII, with no duplicate pair; each extension typeCode occurs in exactly one declaration and its memberId starts with ext:<declaration.id>:; (5) payload counts equal actual member counts, plaintextLength is the checked member-length sum, and messageCount is ceilDiv(length,262144); (6) planSha256 is SHA-256 of the container-v1 domain-tagged JCS projection; (7) database <=2147483648 bytes, each/all attachments <=52428800/5368709120, each/all extensions <=16777216/67108864, payload <=8589934592; (8) portable meta snapshot id/time, portable/scalar/classification/recurrence/tzdb versions, source mutation counter, and schema fingerprint equal this manifest; (9) every portable available authoritative attachment has exactly one same-ID member with matching plaintext length/hash; missing/corrupt have none, and processing/thumbnail/orphan bytes are forbidden; (10) attachment total = available + missing + corrupt, available = attachmentMemberCount, and complete iff both gap counts are zero; (11) record total equals both five-type sum and active+archived+trashed sum, with trashed taking precedence; (12) systemReferenced equals the unique sorted template reference set; (13) all counts/sync summaries equal defensive portable queries; no account, space, membership, installation or device ID, secret/token, provider path/URI, filename, title, MIME, or content is allowed; (14) current writer emits capability 1, empty feature/extension arrays, sqlcipher_portable_v1, and no extension member.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifestSchemaVersion",
+    "containerFormatVersion",
+    "suiteId",
+    "containerId",
+    "scalarEncodingVersion",
+    "portableDataSchemaVersion",
+    "minimumReaderCapabilityVersion",
+    "producer",
+    "snapshot",
+    "requiredFeatures",
+    "extensions",
+    "completeness",
+    "portableDatabase",
+    "systemTemplateReferences",
+    "counts",
+    "syncSummary",
+    "members",
+    "payload"
+  ],
+  "properties": {
+    "manifestSchemaVersion": {
+      "const": 1
+    },
+    "containerFormatVersion": {
+      "const": 1
+    },
+    "suiteId": {
+      "const": 1
+    },
+    "containerId": {
+      "$ref": "#/$defs/containerId"
+    },
+    "scalarEncodingVersion": {
+      "const": 1
+    },
+    "portableDataSchemaVersion": {
+      "$ref": "#/$defs/positiveInt32"
+    },
+    "minimumReaderCapabilityVersion": {
+      "$ref": "#/$defs/positiveInt32",
+      "$comment": "Platform-independent monotonic backup-reader capability registry. A reader rejects a value above its compiled capability. Writer v1 emits 1."
+    },
+    "producer": {
+      "$ref": "#/$defs/producer"
+    },
+    "snapshot": {
+      "$ref": "#/$defs/snapshot"
+    },
+    "requiredFeatures": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/registryToken"
+      },
+      "$comment": "Must be strictly sorted by ASCII bytes. Writer v1 emits an empty array. A reader rejects every unknown token before reading payload."
+    },
+    "extensions": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/extensionDeclaration"
+      },
+      "$comment": "Must be strictly sorted by (id ASCII, version). Writer v1 emits an empty array. JCS bytes of this array must not exceed 65536."
+    },
+    "completeness": {
+      "$ref": "#/$defs/completeness"
+    },
+    "portableDatabase": {
+      "$ref": "#/$defs/portableDatabase"
+    },
+    "systemTemplateReferences": {
+      "type": "array",
+      "maxItems": 10000,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/systemTemplateReference"
+      },
+      "$comment": "Unique set of system sourceTemplateId/sourceTemplateRevision pairs used by portable records; strictly sorted by templateId ASCII then numeric revision. It contains no template title or body."
+    },
+    "counts": {
+      "$ref": "#/$defs/counts"
+    },
+    "syncSummary": {
+      "$ref": "#/$defs/syncSummary"
+    },
+    "members": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10016,
+      "uniqueItems": true,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/databaseMember"
+          },
+          {
+            "$ref": "#/$defs/attachmentMember"
+          },
+          {
+            "$ref": "#/$defs/extensionMember"
+          }
+        ]
+      },
+      "allOf": [
+        {
+          "contains": {
+            "$ref": "#/$defs/databaseMember"
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "$ref": "#/$defs/attachmentMember"
+          },
+          "minContains": 0,
+          "maxContains": 10000
+        },
+        {
+          "contains": {
+            "$ref": "#/$defs/extensionMember"
+          },
+          "minContains": 0,
+          "maxContains": 15
+        }
+      ],
+      "$comment": "Must be strictly sorted by (typeCode numeric, memberId ASCII bytes), so pair uniqueness is stronger than uniqueItems. typeCode 2..32767 is never accepted."
+    },
+    "payload": {
+      "$ref": "#/$defs/payload"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "completeness": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "const": "complete"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        },
+        "required": [
+          "completeness"
+        ]
+      },
+      "then": {
+        "properties": {
+          "counts": {
+            "type": "object",
+            "properties": {
+              "attachments": {
+                "type": "object",
+                "properties": {
+                  "missing": {
+                    "const": 0
+                  },
+                  "corrupt": {
+                    "const": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "anyOf": [
+          {
+            "properties": {
+              "counts": {
+                "type": "object",
+                "properties": {
+                  "attachments": {
+                    "type": "object",
+                    "properties": {
+                      "missing": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "counts": {
+                "type": "object",
+                "properties": {
+                  "attachments": {
+                    "type": "object",
+                    "properties": {
+                      "corrupt": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "positiveInt32": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "recordCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 50000
+    },
+    "attachmentCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "containerId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "$comment": "hex(header.containerId); this is not a UUID."
+    },
+    "entityId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "instant": {
+      "type": "string",
+      "pattern": "^(?:000[1-9]|00[1-9][0-9]|0[1-9][0-9]{2}|[1-9][0-9]{3})-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+      "$comment": "A semantic parser must additionally reject impossible Gregorian dates."
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "xchachaNonce": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{48}$"
+    },
+    "wrapped32ByteKey": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{96}$"
+    },
+    "longCounter": {
+      "type": "string",
+      "maxLength": 19,
+      "pattern": "^(?:0|[1-9][0-9]{0,18})$",
+      "$comment": "A semantic parser must additionally enforce <= 9223372036854775807."
+    },
+    "positiveDbLength": {
+      "type": "string",
+      "maxLength": 10,
+      "pattern": "^[1-9][0-9]{0,9}$",
+      "$comment": "Semantic maximum 2147483648 bytes."
+    },
+    "positiveAttachmentLength": {
+      "type": "string",
+      "maxLength": 8,
+      "pattern": "^[1-9][0-9]{0,7}$",
+      "$comment": "Semantic maximum 52428800 bytes."
+    },
+    "positiveExtensionLength": {
+      "type": "string",
+      "maxLength": 8,
+      "pattern": "^[1-9][0-9]{0,7}$",
+      "$comment": "Semantic maximum 16777216 bytes."
+    },
+    "positivePayloadLength": {
+      "type": "string",
+      "maxLength": 10,
+      "pattern": "^[1-9][0-9]{0,9}$",
+      "$comment": "Semantic maximum 8589934592 bytes."
+    },
+    "registryToken": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+    },
+    "extensionMemberId": {
+      "type": "string",
+      "maxLength": 133,
+      "pattern": "^ext:[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*:[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "safeBuildString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$"
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "appVersion",
+        "buildIdentifier"
+      ],
+      "properties": {
+        "platform": {
+          "enum": [
+            "ios",
+            "android"
+          ]
+        },
+        "appVersion": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64,
+          "pattern": "^[0-9]+(?:\\.[0-9]+){1,3}(?:-[0-9A-Za-z.-]+)?$"
+        },
+        "buildIdentifier": {
+          "$ref": "#/$defs/safeBuildString"
+        }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "capturedAt",
+        "scope",
+        "sourceDataMutationCounter",
+        "portableClassificationVersion",
+        "recurrenceEngineVersion",
+        "tzdbVersion"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/entityId"
+        },
+        "capturedAt": {
+          "$ref": "#/$defs/instant"
+        },
+        "scope": {
+          "const": "full"
+        },
+        "sourceDataMutationCounter": {
+          "$ref": "#/$defs/longCounter"
+        },
+        "portableClassificationVersion": {
+          "$ref": "#/$defs/positiveInt32"
+        },
+        "recurrenceEngineVersion": {
+          "$ref": "#/$defs/positiveInt32"
+        },
+        "tzdbVersion": {
+          "type": "string",
+          "pattern": "^[0-9]{4}[a-z]$"
+        }
+      }
+    },
+    "extensionDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "memberTypeCodes",
+        "dataHex"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/registryToken"
+        },
+        "version": {
+          "$ref": "#/$defs/positiveInt32"
+        },
+        "memberTypeCodes": {
+          "type": "array",
+          "maxItems": 15,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 32768,
+            "maximum": 65535
+          }
+        },
+        "dataHex": {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^(?:[0-9a-f]{2})*$",
+          "$comment": "At most 2048 decoded bytes; the encoded string also stays within the global 4096-byte string budget."
+        }
+      }
+    },
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "complete",
+            "recoverable_with_attachment_gaps"
+          ]
+        }
+      }
+    },
+    "snapshotDataKeySlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slotId",
+        "nonce",
+        "ciphertext"
+      ],
+      "properties": {
+        "slotId": {
+          "const": 1
+        },
+        "nonce": {
+          "$ref": "#/$defs/xchachaNonce"
+        },
+        "ciphertext": {
+          "$ref": "#/$defs/wrapped32ByteKey"
+        }
+      }
+    },
+    "portableDatabase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memberId",
+        "cipherProfileId",
+        "schemaSha256",
+        "snapshotDataKeySlot"
+      ],
+      "properties": {
+        "memberId": {
+          "const": "database"
+        },
+        "cipherProfileId": {
+          "const": "sqlcipher_portable_v1"
+        },
+        "schemaSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "snapshotDataKeySlot": {
+          "$ref": "#/$defs/snapshotDataKeySlot"
+        }
+      }
+    },
+    "systemTemplateReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "templateId",
+        "templateRevision"
+      ],
+      "properties": {
+        "templateId": {
+          "$ref": "#/$defs/entityId"
+        },
+        "templateRevision": {
+          "$ref": "#/$defs/revision"
+        }
+      }
+    },
+    "recordsByType": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recurring_item",
+        "checklist",
+        "memo",
+        "important_date",
+        "household_item"
+      ],
+      "properties": {
+        "recurring_item": {
+          "$ref": "#/$defs/recordCount"
+        },
+        "checklist": {
+          "$ref": "#/$defs/recordCount"
+        },
+        "memo": {
+          "$ref": "#/$defs/recordCount"
+        },
+        "important_date": {
+          "$ref": "#/$defs/recordCount"
+        },
+        "household_item": {
+          "$ref": "#/$defs/recordCount"
+        }
+      }
+    },
+    "recordsByLifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "active",
+        "archived",
+        "trashed"
+      ],
+      "properties": {
+        "active": {
+          "$ref": "#/$defs/recordCount"
+        },
+        "archived": {
+          "$ref": "#/$defs/recordCount"
+        },
+        "trashed": {
+          "$ref": "#/$defs/recordCount"
+        }
+      }
+    },
+    "recordCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "byType",
+        "byLifecycle"
+      ],
+      "properties": {
+        "total": {
+          "$ref": "#/$defs/recordCount"
+        },
+        "byType": {
+          "$ref": "#/$defs/recordsByType"
+        },
+        "byLifecycle": {
+          "$ref": "#/$defs/recordsByLifecycle"
+        }
+      }
+    },
+    "templateCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "userIncluded",
+        "systemReferenced"
+      ],
+      "properties": {
+        "userIncluded": {
+          "$ref": "#/$defs/recordCount"
+        },
+        "systemReferenced": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    },
+    "attachmentCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "available",
+        "missing",
+        "corrupt"
+      ],
+      "properties": {
+        "total": {
+          "$ref": "#/$defs/attachmentCount"
+        },
+        "available": {
+          "$ref": "#/$defs/attachmentCount"
+        },
+        "missing": {
+          "$ref": "#/$defs/attachmentCount"
+        },
+        "corrupt": {
+          "$ref": "#/$defs/attachmentCount"
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "records",
+        "templates",
+        "attachments"
+      ],
+      "properties": {
+        "records": {
+          "$ref": "#/$defs/recordCounts"
+        },
+        "templates": {
+          "$ref": "#/$defs/templateCounts"
+        },
+        "attachments": {
+          "$ref": "#/$defs/attachmentCounts"
+        }
+      }
+    },
+    "syncSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "datasetBindingState",
+        "hasProvenance",
+        "hasSnapshotGeneration",
+        "pendingStockChangeIntents",
+        "unacknowledgedSyncMutations"
+      ],
+      "properties": {
+        "datasetBindingState": {
+          "enum": [
+            "unbound",
+            "analyzing",
+            "choice_required",
+            "binding",
+            "bound",
+            "paused",
+            "auth_required",
+            "detaching"
+          ]
+        },
+        "hasProvenance": {
+          "type": "boolean"
+        },
+        "hasSnapshotGeneration": {
+          "type": "boolean"
+        },
+        "pendingStockChangeIntents": {
+          "$ref": "#/$defs/count",
+          "$comment": "Exact count of StockChangeIntent.state == pending."
+        },
+        "unacknowledgedSyncMutations": {
+          "$ref": "#/$defs/count",
+          "$comment": "Exact count of SyncMutation state in pending, sending, retry_wait, conflict, rejected_forbidden, rejected_moved, rejected_version; acknowledged is excluded."
+        }
+      }
+    },
+    "databaseMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "typeCode",
+        "memberId",
+        "required",
+        "byteLength",
+        "sha256"
+      ],
+      "properties": {
+        "typeCode": {
+          "const": 0
+        },
+        "memberId": {
+          "const": "database"
+        },
+        "required": {
+          "const": true
+        },
+        "byteLength": {
+          "$ref": "#/$defs/positiveDbLength"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "attachmentMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "typeCode",
+        "memberId",
+        "required",
+        "byteLength",
+        "sha256"
+      ],
+      "properties": {
+        "typeCode": {
+          "const": 1
+        },
+        "memberId": {
+          "$ref": "#/$defs/entityId"
+        },
+        "required": {
+          "const": true
+        },
+        "byteLength": {
+          "$ref": "#/$defs/positiveAttachmentLength"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "extensionMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "typeCode",
+        "memberId",
+        "required",
+        "byteLength",
+        "sha256"
+      ],
+      "properties": {
+        "typeCode": {
+          "type": "integer",
+          "minimum": 32768,
+          "maximum": 65535
+        },
+        "memberId": {
+          "$ref": "#/$defs/extensionMemberId"
+        },
+        "required": {
+          "const": false
+        },
+        "byteLength": {
+          "$ref": "#/$defs/positiveExtensionLength"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memberCount",
+        "attachmentMemberCount",
+        "extensionMemberCount",
+        "plaintextLength",
+        "messageCount",
+        "planSha256"
+      ],
+      "properties": {
+        "memberCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10016
+        },
+        "attachmentMemberCount": {
+          "$ref": "#/$defs/attachmentCount"
+        },
+        "extensionMemberCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "plaintextLength": {
+          "$ref": "#/$defs/positivePayloadLength"
+        },
+        "messageCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32768
+        },
+        "planSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}
