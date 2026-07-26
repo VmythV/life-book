@@ -1,12 +1,12 @@
 # 生活有谱领域模型
 
-> 项目代号：`life-book` · 版本：v1.11 · 更新日期：2026-07-26 · 状态：领域基线
+> 项目代号：`life-book` · 版本：v1.12 · 更新日期：2026-07-26 · 状态：文档基线
 >
 > 权威范围：逻辑实体、值对象、字段语义、关系、聚合边界和领域不变量
 >
 > 不负责：数据库表名与索引、JSON 字段拼写、页面布局、时间算法和阶段归属
 >
-> 依赖文档：[产品需求基线](product-features.md)、[产品路线图](roadmap.md)、[术语表](glossary.md)、[产品决策记录](product-decisions.md)
+> 依赖文档：[产品需求基线](product-features.md)、[产品路线图](roadmap.md)、[术语表](glossary.md)、[产品决策记录](product-decisions.md)、[提醒规范](reminders-and-notifications.md)、[TD-009 原生提醒调度](adr/0009-native-reminder-scheduler.md)、[TD-010 原子恢复](adr/0010-sqlite-snapshot-migration-and-atomic-restore.md)
 
 本文定义与客户端框架、数据库和服务端实现无关的逻辑模型。物理存储必须映射到这里，不能通过数据库方便性改变领域含义；机器交换格式由 Schema 和接口契约定义。
 
@@ -35,6 +35,8 @@
 | `Revision` | 当前存储副本内的单实体乐观并发版本。 | 正整数，从 1 开始；每次本地持久化业务改变递增，不用于比较不同设备的先后。 |
 | `ServerVersion` | 服务端为一个同步实体确认的版本。 | 非负整数；0 表示尚未上传，服务端每次接受改变后单调递增。 |
 | `ServerSequence` | 服务端在一个空间内分配的变更顺序。 | 单调递增且不依赖设备时钟；只比较同一空间。 |
+| `LongCounter` | 跨 SQLite/native/JS/接口边界的非负单调计数器。 | `0...9223372036854775807`；递增使用 checked `+1`，不得回绕或用 JavaScript `number`；边界编码遵循 TD-006。 |
+| `NotificationDatasetEpoch` | 隔离不同 active dataset 通知副作用的 branded `LongCounter`。 | 权威值只来自当前 `phase=active` 的受认证 `DatasetControlRecord`；初始化为 `0`，仅提交成功的整体恢复/手动回滚递增。 |
 | `ContentHash` | 内容完整性哈希。 | 用于附件、备份和同步校验，不作为加密。 |
 
 所有用户可见文本使用 Unicode。长度按 Unicode 码点校验；存储不得静默截断。
@@ -86,6 +88,8 @@ Account    ── joins ── Space ── contains ── Record
                                       └── HouseholdItem → StockTransaction → LowStockEpisode
 
 Any supported source → ReminderPlan → ReminderInstance → NotificationDelivery
+Notification response → NotificationActionInbox → domain command
+Active dataset epoch → NotificationReconciliationState → platform projection
 ```
 
 清单模板归属于空间，但不是 `Record`；它通过快照产生清单实例。
@@ -530,8 +534,10 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 | `deviceId` | `EntityId?` | P1 登录设备；同一账号多个 Device 分别投递。 |
 | `transport` | `local_notification \| remote_push` | 本地和远程尝试不能共用平台成功证据。 |
 | `platform` | `ios \| android` | 产生请求的平台；服务端远程路由仍指向目标设备平台。 |
-| `platformRequestId` | 文本 | 版本化稳定不透明 ID；不包含用户内容。 |
-| `attemptSequence` | 正整数 | 同一设备槽位和 request ID 内递增；判断最新 attempt，不用设备时间排序。 |
+| `platformRequestId` | 文本 | 项目生成的版本化 `lbr2:` 稳定不透明 ID；不包含用户内容。 |
+| `adapterNativeId` | 文本? | 平台/adapter 返回的内部 ID；只能用于本机定向清理，不能成为恢复或幂等身份。 |
+| `notificationDatasetEpoch` | `NotificationDatasetEpoch` | 必填；只有等于当前 active control 的行才可能成为当前证据。 |
+| `attemptSequence` | `LongCounter` | 同一设备槽位、epoch 和 platformRequestId 内从 1 递增；判断最新 attempt，不用设备时间排序。 |
 | `scheduleFingerprint` | ContentHash | 覆盖目标、内容策略、payload/category、隐私和精度；不保存可见文案。 |
 | `status` | `requested \| accepted \| observed_trigger \| observed_action \| cancelled \| rejected \| missing` | 语义以 REM-013 为准；accepted 只表示平台 API 接受。 |
 | `evidence` | `ios_pending \| android_registry_only \| adapter_receipt \| none` | Android registry 不能单独证明 AlarmManager 仍有请求。 |
@@ -539,7 +545,52 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 | `environmentGeneration` | 非负整数 | 调度使用的平台能力/环境代次；变化时旧证据失效。 |
 | `requestedAt`、`acceptedAt`、`observedAt`、`cancelledAt` | `Instant?` | 适用状态写入；不用它们决定跨设备先后。 |
 | `failureCode` | 受控错误? | 不含标题、正文、payload 或原生任意错误消息。 |
+| `adapterContractVersion` | 正整数 | 解释 receipt、evidence 和 adapter metadata 的固定合同版本。 |
 | 公共元数据 | `EntityMeta` | — |
+
+当前证据的唯一身份至少绑定 `(installation/device slot, notificationDatasetEpoch, platformRequestId, attemptSequence)`。同一 request 的较早 attempt、其他 epoch 或其他 adapter contract 不能覆盖最新结果；本实体是 device-only 投影，不进入 portable backup。
+
+### 14.4 `NotificationActionInbox`
+
+表示已经通过 active dataset epoch 与 request-ID fence 的通知 response。旧、缺失、非法或 future epoch response 在写入前就永久 no-op，因此不创建本实体。
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `actionInboxId` | `ContentHash` | TD-009 canonical hash 幂等键；相同通知动作重放只返回既有结果。 |
+| `responseId` | 文本 | transport 回调身份；与 platformRequestId 分离。 |
+| `platformRequestId` | 文本 | 已重算并恒时匹配的项目 `lbr2:` ID。 |
+| `notificationDatasetEpoch` | `NotificationDatasetEpoch` | 必须等于写入时 active control，并在命令提交前再次匹配。 |
+| `installationId` | `EntityId` | 当前设备；不随备份、同步或手动回滚迁移。 |
+| `transport` | `local_notification \| remote_push` | 决定受控 parser/adapter，不改变 epoch gate。 |
+| `categoryContractId`、`categoryContractVersion` | 文本、正整数 | 已登记的 category 合同及其语义版本。 |
+| `actionId` | 文本 | 用户实际动作；只能来自该 category/version allowlist。 |
+| `actionContractVersion`、`payloadContractVersion` | 正整数 | 缺失、未来或不兼容版本不得猜测。 |
+| `reminderInstanceId` | `EntityId` | 不透明目标；只有当前授权/状态检查通过后使用。 |
+| `sourceType`、`sourceId` | 受控枚举、`EntityId?` | payload allowlist 中允许的最小来源引用。 |
+| `receivedAt`、`processedAt` | `Instant`、`Instant?` | 不用设备时间决定幂等或跨设备顺序。 |
+| `processingState` | `pending \| processing \| applied \| business_noop \| failed_retryable \| failed_terminal` | `business_noop` 用于 current-epoch 但来源已经终态/失权/过期；stale epoch 不入箱。 |
+| `resultCode` | 受控无内容码? | 不保存标题、正文、原始 payload 或平台错误。 |
+| 公共元数据 | `EntityMeta` | revision 只跟踪本机 inbox 状态，不参与同步。 |
+
+### 14.5 `NotificationReconciliationState`
+
+每个 `(installationId, notificationDatasetEpoch, platform)` 至多一项，用于解释当前设备的调度覆盖；它不是 ReminderPlan/Instance 的业务事实。
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `installationId` | `EntityId` | 当前设备。 |
+| `notificationDatasetEpoch` | `NotificationDatasetEpoch` | 与 active control 不同即整体失效。 |
+| `platform` | `ios \| android` | 分别维护平台预算与证据。 |
+| `state` | `pending \| running \| succeeded \| degraded` | succeeded 只证明该 epoch 的一次完整对账。 |
+| `scheduledThrough` | `Instant?` | 仅同 epoch succeeded 状态可作为当前覆盖水位。 |
+| `lastCompletedAt` | `Instant?` | 不能脱离 epoch 显示为“最近成功”。 |
+| `environmentGeneration` | 非负整数 | 平台能力环境代次；不得代替 dataset epoch。 |
+| `capabilityFingerprint` | `ContentHash` | 覆盖权限、精度、预算和 adapter 能力，不含内容。 |
+| `budget` | 非负整数 | 本轮固定平台预算。 |
+| `tzdbVersion`、`recurrenceEngineVersion`、`adapterContractVersion` | 版本 | 任一不匹配使水位失效并触发重算。 |
+| `failureCode` | 受控无内容码? | degraded 时解释重试原因。 |
+
+`NotificationDelivery`、`NotificationActionInbox` 和 `NotificationReconciliationState` 都是 device-only，不进入 portable backup、业务同步或用户导出。
 
 #### DOM-070：提醒与记录独立
 
@@ -547,13 +598,21 @@ accepted 意图必须恰好对应一条 StockTransaction，且 `intent.resultTra
 
 #### DOM-071：收件人状态与设备投递分离
 
-ReminderInstance 在一个 subscription/收件人范围内共享。P0 当前 installation 有未失效 accepted delivery 时可从 planned 聚合为 scheduled；P1 至少一个当前适用 Device 有未失效 accepted delivery 时可聚合为 scheduled。单台设备 rejected/missing、权限拒绝、渠道关闭或预算不足不得覆盖其他设备，也不得单独把共享实例改成 failed；每台设备的“已安排/近似/等待权限/失败”从自己的最新 NotificationDelivery 派生。
+ReminderInstance 在一个 subscription/收件人范围内共享。P0 当前 installation 有当前 epoch、未失效的 accepted delivery 时可从 planned 聚合为 scheduled；P1 至少一个当前适用 Device 有其当前 epoch、未失效的 accepted delivery 时可聚合为 scheduled。单台设备 rejected/missing、权限拒绝、渠道关闭或预算不足不得覆盖其他设备，也不得单独把共享实例改成 failed；每台设备的“已安排/近似/等待权限/失败”从自己的最新同 epoch NotificationDelivery 派生。
 
 只有收件人范围内全部当前适用设备均为不可重试失败、且没有 accepted 或待重试 attempt 时，ReminderInstance 才可进入 failed。权限未询问/拒绝、渠道关闭、容量不足或暂时没有活跃设备时保持 planned，并保留原因供界面解释。
 
 #### DOM-072：平台证据不等于送达
 
-NotificationDelivery accepted、iOS pending、Android adapter registry、远程推送供应商 receipt 和 observed trigger/action 都不能证明用户看到通知。Android 跳过重挂还必须同时具有当前 registry 匹配和相同 fingerprint、precision、environment generation 的最新 accepted attempt；较早 accepted 不能覆盖较新的 requested/rejected/missing/cancelled。
+NotificationDelivery accepted、iOS pending、Android adapter registry、远程推送供应商 receipt 和 observed trigger/action 都不能证明用户看到通知。Android 跳过重挂还必须同时具有当前 epoch registry 匹配和相同 platformRequestId、fingerprint、precision、environment generation、adapter contract 的最新 accepted attempt；较早或其他 epoch 的 accepted 不能覆盖较新的 requested/rejected/missing/cancelled。
+
+#### DOM-073：通知数据集隔离
+
+- `notificationDatasetEpoch` 的唯一权威是当前 `phase=active` 的受认证 `DatasetControlRecord`；control 不可读、phase 非 active 或 Repository 尚未开放时，不签发通知 read lease，不调度、不写 ActionInbox、不导航目标、不执行命令；
+- Delivery、ActionInbox、reconcile task/checkpoint、scheduled-through、request ID 和 payload 携带的 epoch 都只是权威值的镜像；缺失、非法、旧或 future epoch 永久 no-op，不能更新当前 ReminderInstance/Delivery、打开目标或产生 mutation；
+- `environmentGeneration` 只表示权限、时间/时区、重启和 adapter 等平台环境变化，与 dataset epoch 不可互换；
+- committed restore/manual rollback checked `+1`；`validating` 无 marker 回 previous 保持原 epoch，marker 后完成 target 不再次递增，schema/cipher migration 保持 epoch；
+- restore/manual rollback 排除全部通知设备证据。没有 current-epoch accepted evidence 的 `scheduled`/`failed` 在来源有效且未来时规范化为 `planned`，过去目标按 REM-032 且不补发；业务终态保留，`paused` 仅在原因仍成立时保留。
 
 ## 15. 设置与本地产品状态
 
@@ -567,7 +626,7 @@ NotificationDelivery accepted、iOS pending、Android adapter registry、远程�
 - 智能首次说明确认版本；
 - 可选遥测同意版本；
 - 备份提示是否展示、上次关闭时间；
-- 最近一次成功提醒对账、备份和恢复时间；
+- 最近一次成功备份和恢复时间；提醒对账时间/水位只能保存在带 `notificationDatasetEpoch` 的 `NotificationReconciliationState`，不能以裸时间存在；
 - 当前数据库、备份和契约版本。
 
 安全密钥、API Key 和令牌只保存安全存储引用，不直接成为 `AppPreferences` 值。
@@ -823,6 +882,9 @@ ReminderPlan 属于家庭业务记录；`ReminderSubscription` 决定哪个 Acco
 | 删除到回收站 | 根生命周期、未来提醒取消任务和必要操作记录。 |
 | 恢复记录 | 根生命周期、派生索引重建标记和未来提醒重建任务。 |
 | 永久删除记录 | 聚合子对象、附件清理任务和适用墓碑。 |
+| 处理会改变状态的通知动作 | 消费 current-epoch `NotificationActionInbox`、领域 mutation、业务幂等结果、inbox 终态和后续提醒对账任务；任一步失败整体回滚。 |
+
+通知 action command 提交前必须再次验证绑定 active generation/epoch 的 read lease；若 activation 已使 lease 失效，事务整体中止。TD-010 activation exclusive gate 必须等待已进入事务的 action 提交/回滚，并使尚未进入事务的 parser/processor no-op；不能在两个 dataset generation 间完成半个动作。
 
 操作系统通知、文件删除和网络发送不可能与数据库处于同一原子事务；领域事务写入可重放任务，再由适配层执行并对账。
 
@@ -928,6 +990,7 @@ StockChangeIntent 表达输入和同步等待，StockTransaction 表达已经接
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.12 | 2026-07-26 | 增加 NotificationDatasetEpoch、ActionInbox、ReconciliationState、同 epoch Delivery 证据和激活门事务不变量，并固定恢复后的提醒状态规范化。 |
 | v1.11 | 2026-07-26 | 纳入 TD-007 历史时间解析证据，并统一 ReminderInstance 收件人范围状态、逐设备 NotificationDelivery 字段与平台证据语义；同步修正页首版本。 |
 | v1.10 | 2026-07-26 | 补齐库存意图/流水一对一约束、同步 generation 防复活机制、direct claim 边界和家庭物品创建事务。 |
 | v1.9 | 2026-07-26 | 以成对 transfer event 保持跨空间记录 ID，并补充 membership 授权代次与提醒实例暂停状态。 |
