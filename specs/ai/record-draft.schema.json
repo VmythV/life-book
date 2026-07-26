@@ -1,0 +1,1290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://life-book.example/specs/ai/record-draft.schema.json",
+  "title": "Life Book DraftEnvelope",
+  "description": "Provider-independent intelligent creation response. Product semantics are defined by docs/ai-creation-contract.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "requestId",
+    "trackingId",
+    "promptVersion",
+    "adapterVersion",
+    "modelAlias",
+    "result",
+    "fieldProvenance",
+    "warningCodes",
+    "usage"
+  ],
+  "properties": {
+    "contractVersion": {
+      "const": "1.0"
+    },
+    "requestId": {
+      "$ref": "#/$defs/opaqueId"
+    },
+    "trackingId": {
+      "$ref": "#/$defs/opaqueId",
+      "description": "Internal tracking ID or a one-way representation of a provider request ID."
+    },
+    "promptVersion": {
+      "$ref": "#/$defs/versionString"
+    },
+    "adapterVersion": {
+      "$ref": "#/$defs/versionString"
+    },
+    "modelAlias": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "result": {
+      "$ref": "#/$defs/result"
+    },
+    "fieldProvenance": {
+      "$ref": "#/$defs/fieldProvenance"
+    },
+    "warningCodes": {
+      "type": "array",
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/warningCode"
+      }
+    },
+    "usage": {
+      "$ref": "#/$defs/usageSummary"
+    }
+  },
+  "$defs": {
+    "opaqueId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "versionString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+    },
+    "localDate": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])$",
+      "$comment": "Validators MUST enable draft 2020-12 format assertion and perform calendar-validity checks."
+    },
+    "localTime": {
+      "type": "string",
+      "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+    },
+    "instant": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$",
+      "$comment": "Validators MUST enable draft 2020-12 format assertion in addition to this canonical lexical check."
+    },
+    "ianaTimeZone": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[A-Za-z][A-Za-z0-9._+-]*(?:/[A-Za-z0-9._+-]+)*$"
+    },
+    "nonBlankTitle": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S"
+    },
+    "longText": {
+      "type": "string",
+      "maxLength": 100000
+    },
+    "shortName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40,
+      "pattern": "\\S"
+    },
+    "unit": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20,
+      "pattern": "\\S"
+    },
+    "exactDecimal": {
+      "type": "string",
+      "description": "Canonical non-negative decimal with at most 18 significant digits and 3 fractional digits.",
+      "pattern": "^(?:0|[1-9][0-9]{0,17}|(?:0|[1-9][0-9]{0,16})\\.[0-9]|(?:0|[1-9][0-9]{0,15})\\.[0-9]{2}|(?:0|[1-9][0-9]{0,14})\\.[0-9]{3})$"
+    },
+    "positiveDecimal": {
+      "description": "Canonical positive decimal with at most 18 significant digits and 3 fractional digits.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/exactDecimal"
+        },
+        {
+          "not": {
+            "pattern": "^0(?:\\.0{1,3})?$"
+          }
+        }
+      ]
+    },
+    "scheduleSpec": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/allDaySchedule"
+        },
+        {
+          "$ref": "#/$defs/floatingSchedule"
+        },
+        {
+          "$ref": "#/$defs/zonedSchedule"
+        },
+        {
+          "$ref": "#/$defs/instantSchedule"
+        }
+      ]
+    },
+    "recurrenceScheduleSpec": {
+      "description": "Schedule variants allowed on a recurring rule segment; instant is intentionally excluded.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/allDaySchedule"
+        },
+        {
+          "$ref": "#/$defs/floatingSchedule"
+        },
+        {
+          "$ref": "#/$defs/zonedSchedule"
+        }
+      ]
+    },
+    "allDaySchedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "localDate"],
+      "properties": {
+        "kind": {
+          "const": "all_day"
+        },
+        "localDate": {
+          "$ref": "#/$defs/localDate"
+        }
+      }
+    },
+    "floatingSchedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "timeBehavior", "localDate", "localTime", "disambiguation"],
+      "properties": {
+        "kind": {
+          "const": "timed"
+        },
+        "timeBehavior": {
+          "const": "floating_local"
+        },
+        "localDate": {
+          "$ref": "#/$defs/localDate"
+        },
+        "localTime": {
+          "$ref": "#/$defs/localTime"
+        },
+        "disambiguation": {
+          "$ref": "#/$defs/disambiguation"
+        }
+      }
+    },
+    "zonedSchedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "timeBehavior", "localDate", "localTime", "timeZoneId", "disambiguation"],
+      "properties": {
+        "kind": {
+          "const": "timed"
+        },
+        "timeBehavior": {
+          "const": "zoned"
+        },
+        "localDate": {
+          "$ref": "#/$defs/localDate"
+        },
+        "localTime": {
+          "$ref": "#/$defs/localTime"
+        },
+        "timeZoneId": {
+          "$ref": "#/$defs/ianaTimeZone"
+        },
+        "disambiguation": {
+          "$ref": "#/$defs/disambiguation"
+        }
+      }
+    },
+    "instantSchedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "timeBehavior", "instant"],
+      "properties": {
+        "kind": {
+          "const": "timed"
+        },
+        "timeBehavior": {
+          "const": "instant"
+        },
+        "instant": {
+          "$ref": "#/$defs/instant"
+        }
+      }
+    },
+    "disambiguation": {
+      "type": "string",
+      "enum": ["compatible", "earlier", "later", "reject"]
+    },
+    "weekday": {
+      "type": "string",
+      "enum": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    },
+    "recurrenceRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frequency", "interval", "endMode"],
+      "properties": {
+        "frequency": {
+          "type": "string",
+          "enum": ["daily", "weekly", "monthly", "yearly"]
+        },
+        "interval": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 999
+        },
+        "byWeekdays": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/weekday"
+          }
+        },
+        "byMonthDays": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 31,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 31
+          }
+        },
+        "yearMonthDay": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["month", "day"],
+          "properties": {
+            "month": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 12
+            },
+            "day": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 31
+            }
+          }
+        },
+        "endMode": {
+          "type": "string",
+          "enum": ["never", "until", "count"]
+        },
+        "untilDate": {
+          "$ref": "#/$defs/localDate"
+        },
+        "occurrenceCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "weekStart": {
+          "type": "string",
+          "enum": ["monday", "sunday"]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "frequency": {
+                "const": "weekly"
+              }
+            },
+            "required": ["frequency"]
+          },
+          "then": {
+            "required": ["byWeekdays", "weekStart"]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["byWeekdays"]
+                },
+                {
+                  "required": ["weekStart"]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "frequency": {
+                "const": "monthly"
+              }
+            },
+            "required": ["frequency"]
+          },
+          "then": {
+            "required": ["byMonthDays"]
+          },
+          "else": {
+            "not": {
+              "required": ["byMonthDays"]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "frequency": {
+                "const": "yearly"
+              }
+            },
+            "required": ["frequency"]
+          },
+          "then": {
+            "required": ["yearMonthDay"]
+          },
+          "else": {
+            "not": {
+              "required": ["yearMonthDay"]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "endMode": {
+                "const": "until"
+              }
+            },
+            "required": ["endMode"]
+          },
+          "then": {
+            "required": ["untilDate"],
+            "not": {
+              "required": ["occurrenceCount"]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "endMode": {
+                "const": "count"
+              }
+            },
+            "required": ["endMode"]
+          },
+          "then": {
+            "required": ["occurrenceCount"],
+            "not": {
+              "required": ["untilDate"]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "endMode": {
+                "const": "never"
+              }
+            },
+            "required": ["endMode"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["untilDate"]
+                },
+                {
+                  "required": ["occurrenceCount"]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "calendarOffset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direction", "value", "unit"],
+      "properties": {
+        "direction": {
+          "type": "string",
+          "enum": ["before", "after"]
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9999
+        },
+        "unit": {
+          "type": "string",
+          "enum": ["minutes", "hours", "days", "weeks", "months"]
+        },
+        "localTime": {
+          "$ref": "#/$defs/localTime"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "unit": {
+                "enum": ["minutes", "hours"]
+              }
+            },
+            "required": ["unit"]
+          },
+          "then": {
+            "not": {
+              "required": ["localTime"]
+            }
+          },
+          "else": {
+            "required": ["localTime"]
+          }
+        }
+      ]
+    },
+    "reminderPlanDraft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trigger"],
+      "properties": {
+        "trigger": {
+          "type": "string",
+          "enum": ["absolute_schedule", "relative_to_schedule", "at_schedule", "state_entered"]
+        },
+        "schedule": {
+          "$ref": "#/$defs/scheduleSpec"
+        },
+        "offset": {
+          "$ref": "#/$defs/calendarOffset"
+        },
+        "followUpPolicyDraft": {
+          "$ref": "#/$defs/followUpPolicyDraft"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "trigger": {
+                "const": "absolute_schedule"
+              }
+            },
+            "required": ["trigger"]
+          },
+          "then": {
+            "required": ["schedule"],
+            "not": {
+              "required": ["offset"]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "trigger": {
+                "const": "relative_to_schedule"
+              }
+            },
+            "required": ["trigger"]
+          },
+          "then": {
+            "required": ["offset"],
+            "not": {
+              "required": ["schedule"]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "trigger": {
+                "enum": ["at_schedule", "state_entered"]
+              }
+            },
+            "required": ["trigger"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["schedule"]
+                },
+                {
+                  "required": ["offset"]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "scheduledSourceReminderDraft": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/reminderPlanDraft"
+        },
+        {
+          "properties": {
+            "trigger": {
+              "enum": ["relative_to_schedule", "at_schedule"]
+            }
+          }
+        }
+      ]
+    },
+    "memoReminderDraft": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/reminderPlanDraft"
+        },
+        {
+          "properties": {
+            "trigger": {
+              "const": "absolute_schedule"
+            }
+          }
+        }
+      ]
+    },
+    "importantDateReminderDraft": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/reminderPlanDraft"
+        },
+        {
+          "properties": {
+            "trigger": {
+              "const": "relative_to_schedule"
+            }
+          }
+        }
+      ]
+    },
+    "followUpPolicyDraft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intervalMinutes", "maxFollowUps", "stopAfterMinutes", "requiresUnacknowledged"],
+      "properties": {
+        "intervalMinutes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 1440
+        },
+        "maxFollowUps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "stopAfterMinutes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 1440
+        },
+        "requiresUnacknowledged": {
+          "const": true
+        }
+      }
+    },
+    "commonDraft": {
+      "type": "object",
+      "required": ["recordType", "title", "sensitivity", "aiAccess"],
+      "properties": {
+        "recordType": {
+          "type": "string",
+          "enum": ["recurring_item", "checklist", "memo", "important_date", "household_item"]
+        },
+        "title": {
+          "$ref": "#/$defs/nonBlankTitle"
+        },
+        "description": {
+          "$ref": "#/$defs/longText"
+        },
+        "categoryName": {
+          "$ref": "#/$defs/shortName"
+        },
+        "tagNames": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/shortName"
+          }
+        },
+        "sensitivity": {
+          "type": "string",
+          "enum": ["normal", "sensitive"]
+        },
+        "aiAccess": {
+          "type": "string",
+          "enum": ["allowed", "denied"]
+        }
+      }
+    },
+    "recurringItemDraft": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/commonDraft"
+        },
+        {
+          "type": "object",
+          "required": ["recordType", "startDate", "schedule", "recurrenceRule"],
+          "properties": {
+            "recordType": {
+              "const": "recurring_item"
+            },
+            "startDate": {
+              "$ref": "#/$defs/localDate"
+            },
+            "schedule": {
+              "$ref": "#/$defs/recurrenceScheduleSpec"
+            },
+            "recurrenceRule": {
+              "$ref": "#/$defs/recurrenceRule"
+            },
+            "reminderPlanDraft": {
+              "$ref": "#/$defs/scheduledSourceReminderDraft"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "checklistGroupDraft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["groupKey", "name"],
+      "properties": {
+        "groupKey": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "name": {
+          "$ref": "#/$defs/shortName"
+        }
+      }
+    },
+    "checklistItemDraft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "\\S"
+        },
+        "description": {
+          "$ref": "#/$defs/longText"
+        },
+        "quantity": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "unit": {
+          "$ref": "#/$defs/unit"
+        },
+        "groupKey": {
+          "$ref": "#/$defs/opaqueId"
+        }
+      },
+      "dependentRequired": {
+        "quantity": ["unit"],
+        "unit": ["quantity"]
+      }
+    },
+    "checklistDraft": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/commonDraft"
+        },
+        {
+          "type": "object",
+          "required": ["recordType", "purpose", "items"],
+          "properties": {
+            "recordType": {
+              "const": "checklist"
+            },
+            "purpose": {
+              "type": "string",
+              "enum": ["general", "shopping"]
+            },
+            "groups": {
+              "type": "array",
+              "maxItems": 500,
+              "items": {
+                "$ref": "#/$defs/checklistGroupDraft"
+              }
+            },
+            "items": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 5000,
+              "items": {
+                "$ref": "#/$defs/checklistItemDraft"
+              }
+            },
+            "dueSchedule": {
+              "$ref": "#/$defs/scheduleSpec"
+            },
+            "reminderPlanDraft": {
+              "$ref": "#/$defs/scheduledSourceReminderDraft"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "memoDraft": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/commonDraft"
+        },
+        {
+          "type": "object",
+          "required": ["recordType", "body"],
+          "properties": {
+            "recordType": {
+              "const": "memo"
+            },
+            "body": {
+              "$ref": "#/$defs/longText"
+            },
+            "reminderPlanDrafts": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "$ref": "#/$defs/memoReminderDraft"
+              }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "gregorianDateValue": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "date"],
+          "properties": {
+            "kind": {
+              "const": "gregorian_once"
+            },
+            "date": {
+              "$ref": "#/$defs/localDate"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "month", "day"],
+          "properties": {
+            "kind": {
+              "const": "gregorian_yearly"
+            },
+            "month": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 12
+            },
+            "day": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 31
+            }
+          }
+        }
+      ]
+    },
+    "lunarDateValue": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "year", "month", "day", "isLeapMonth"],
+          "properties": {
+            "kind": {
+              "const": "chinese_lunar_once"
+            },
+            "year": {
+              "type": "integer",
+              "minimum": 1900,
+              "maximum": 2100
+            },
+            "month": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 12
+            },
+            "day": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30
+            },
+            "isLeapMonth": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "month", "day", "isLeapMonth"],
+          "properties": {
+            "kind": {
+              "const": "chinese_lunar_yearly"
+            },
+            "month": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 12
+            },
+            "day": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30
+            },
+            "isLeapMonth": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "importantDateDraft": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/commonDraft"
+        },
+        {
+          "type": "object",
+          "required": ["recordType", "eventKind", "calendarSystem", "recurrenceMode", "dateValue", "counterDisplay"],
+          "properties": {
+            "recordType": {
+              "const": "important_date"
+            },
+            "eventKind": {
+              "type": "string",
+              "enum": ["birthday", "anniversary", "expiry", "other"]
+            },
+            "calendarSystem": {
+              "type": "string",
+              "enum": ["gregorian", "chinese_lunar"]
+            },
+            "recurrenceMode": {
+              "type": "string",
+              "enum": ["once", "yearly"]
+            },
+            "dateValue": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/gregorianDateValue"
+                },
+                {
+                  "$ref": "#/$defs/lunarDateValue"
+                }
+              ]
+            },
+            "startYear": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9999
+            },
+            "counterDisplay": {
+              "type": "string",
+              "enum": ["auto", "hidden"]
+            },
+            "reminderPlanDrafts": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "$ref": "#/$defs/importantDateReminderDraft"
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "calendarSystem": {
+                    "const": "gregorian"
+                  }
+                },
+                "required": ["calendarSystem"]
+              },
+              "then": {
+                "properties": {
+                  "dateValue": {
+                    "$ref": "#/$defs/gregorianDateValue"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "dateValue": {
+                    "$ref": "#/$defs/lunarDateValue"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "recurrenceMode": {
+                    "const": "once"
+                  }
+                },
+                "required": ["recurrenceMode"]
+              },
+              "then": {
+                "properties": {
+                  "dateValue": {
+                    "properties": {
+                      "kind": {
+                        "enum": ["gregorian_once", "chinese_lunar_once"]
+                      }
+                    }
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "dateValue": {
+                    "properties": {
+                      "kind": {
+                        "enum": ["gregorian_yearly", "chinese_lunar_yearly"]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "householdInventoryDraft": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/commonDraft"
+        },
+        {
+          "type": "object",
+          "required": ["recordType", "initialQuantity", "unit"],
+          "properties": {
+            "recordType": {
+              "const": "household_item"
+            },
+            "initialQuantity": {
+              "$ref": "#/$defs/exactDecimal"
+            },
+            "unit": {
+              "$ref": "#/$defs/unit"
+            },
+            "lowStockThreshold": {
+              "$ref": "#/$defs/exactDecimal"
+            },
+            "storageLocation": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "openingNote": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "recordDraft": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/recurringItemDraft"
+        },
+        {
+          "$ref": "#/$defs/checklistDraft"
+        },
+        {
+          "$ref": "#/$defs/memoDraft"
+        },
+        {
+          "$ref": "#/$defs/importantDateDraft"
+        },
+        {
+          "$ref": "#/$defs/householdInventoryDraft"
+        }
+      ]
+    },
+    "inputRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startCodePoint", "endCodePoint"],
+      "properties": {
+        "startCodePoint": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endCodePoint": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "provenanceEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["explicit", "inferred", "default", "confirmed_edit"]
+        },
+        "inputRange": {
+          "$ref": "#/$defs/inputRange"
+        }
+      }
+    },
+    "fieldProvenance": {
+      "type": "object",
+      "maxProperties": 20000,
+      "propertyNames": {
+        "pattern": "^/(?:[^~/]|~0|~1)+(?:/(?:[^~/]|~0|~1)+)*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/provenanceEntry"
+      }
+    },
+    "warningCode": {
+      "type": "string",
+      "enum": [
+        "used_default_time",
+        "inferred_title",
+        "inferred_low_stock_threshold",
+        "past_reminder_omitted",
+        "timezone_explicit",
+        "large_generated_checklist",
+        "sensitive_content_notice",
+        "provider_fallback_used"
+      ]
+    },
+    "clarification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["questionId", "reasonCode", "promptKey", "answerType", "options"],
+      "properties": {
+        "questionId": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "reasonCode": {
+          "type": "string",
+          "enum": ["ambiguous_date", "ambiguous_time", "ambiguous_duration", "ambiguous_quantity", "ambiguous_unit", "ambiguous_type", "ambiguous_range", "ambiguous_timezone"]
+        },
+        "promptKey": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "params": {
+          "type": "object",
+          "maxProperties": 10,
+          "additionalProperties": {
+            "type": ["string", "number", "boolean"]
+          }
+        },
+        "answerType": {
+          "type": "string",
+          "enum": ["date", "time", "number", "unit", "single_choice", "short_text"]
+        },
+        "options": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value", "labelKey"],
+            "properties": {
+              "value": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "labelKey": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+              }
+            }
+          }
+        },
+        "suggestedAnswer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value", "source"],
+          "properties": {
+            "value": {
+              "type": ["string", "number"]
+            },
+            "source": {
+              "const": "default"
+            }
+          }
+        }
+      }
+    },
+    "detectedIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recordType", "summary"],
+      "properties": {
+        "recordType": {
+          "type": "string",
+          "enum": ["recurring_item", "checklist", "memo", "important_date", "household_item", "unknown"]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    },
+    "result": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "draft"],
+          "properties": {
+            "status": {
+              "const": "draft"
+            },
+            "draft": {
+              "$ref": "#/$defs/recordDraft"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "clarification"],
+          "properties": {
+            "status": {
+              "const": "clarification_required"
+            },
+            "clarification": {
+              "$ref": "#/$defs/clarification"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {
+            "status": {
+              "const": "unrecognized"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "detectedIntents"],
+          "properties": {
+            "status": {
+              "const": "multiple_intents"
+            },
+            "detectedIntents": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 5,
+              "items": {
+                "$ref": "#/$defs/detectedIntent"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reasonCode"],
+          "properties": {
+            "status": {
+              "const": "unsupported"
+            },
+            "reasonCode": {
+              "type": "string",
+              "enum": ["unsupported_record_type", "unsupported_calendar", "unsupported_recurrence", "unsupported_attachment", "unsupported_existing_record_action", "unsupported_multi_draft", "unsupported_capability"]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reasonCode"],
+          "properties": {
+            "status": {
+              "const": "content_refused"
+            },
+            "reasonCode": {
+              "type": "string",
+              "enum": ["provider_policy", "product_safety", "unknown"]
+            }
+          }
+        }
+      ]
+    },
+    "usageSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputUnits", "outputUnits", "providerAttempts"],
+      "properties": {
+        "inputUnits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outputUnits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "providerAttempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        }
+      }
+    }
+  }
+}
