@@ -1,6 +1,6 @@
 # 生活有谱文档治理规范
 
-> 项目代号：`life-book` · 版本：v1.2 · 更新日期：2026-07-26 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.2.1 · 更新日期：2026-07-27 · 状态：文档基线
 >
 > 权威范围：文档类型、唯一职责、状态、版本、稳定编号、权威关系、机器契约登记、变更流程与阶段门
 >
@@ -160,7 +160,7 @@ ADR 不使用上述中文状态，其 `Status` 只允许 `Proposed`、`Accepted`
 
 ### 4.7 文档存在性与准入 Registry
 
-本节是 `GOV-REGISTRY-2026-07-26-01` 的事实快照，覆盖 26 份 `docs/` 根目录文档、1 份 ADR 索引和本规范已登记但尚缺失的 13 份文档，共 40 项。快照锚点是**首次提交该 snapshot ID 时修改本文件的 Git 提交**；提交后用 `git log --format=%H --fixed-strings --grep='Registry-Snapshot: GOV-REGISTRY-2026-07-26-01' -1` 解析其不可变 SHA，避免在文件内写入会改变自身提交 SHA 的循环引用。提交信息必须带唯一 trailer `Registry-Snapshot: GOV-REGISTRY-2026-07-26-01`；以后任何修改本文件都必须完整重审 registry、分配未使用的新 snapshot ID 和新 trailer，绝不让旧 ID 自动漂移到另一 SHA。只要登记范围内工作树不清洁，或锚点后任一登记路径发生变化，快照即为 `STALE`，所有由它推导的 `PASS` 暂停生效，直到重审本节并以新快照提交。“文档 Gate”只表示该文件能否计入声明的 Gate scope；不替代其引用的 OQ、ADR、机器合同或实现证据门。
+本节是 `GOV-REGISTRY-2026-07-27-01` 的事实快照，覆盖 26 份 `docs/` 根目录文档、1 份 ADR 索引和本规范已登记但尚缺失的 13 份文档，共 40 项。快照锚点是**首次提交该 snapshot ID 时修改本文件的 Git 提交**；提交后用 `git log --format=%H --fixed-strings --grep='Registry-Snapshot: GOV-REGISTRY-2026-07-27-01' -1` 解析其不可变 SHA，避免在文件内写入会改变自身提交 SHA 的循环引用。提交信息必须带唯一 trailer `Registry-Snapshot: GOV-REGISTRY-2026-07-27-01`；以后任何修改本文件都必须完整重审 registry、分配未使用的新 snapshot ID 和新 trailer，绝不让旧 ID 自动漂移到另一 SHA。只要登记范围内工作树不清洁，或锚点后任一登记路径发生变化，快照即为 `STALE`，所有由它推导的 `PASS` 暂停生效，直到重审本节并以新快照提交。“文档 Gate”只表示该文件能否计入声明的 Gate scope；不替代其引用的 OQ、ADR、机器合同或实现证据门。
 
 #### 4.7.1 治理、方向与范围
 
@@ -578,6 +578,7 @@ Gate 按 scope 分别计算，不能套用一条会令开发前置条件依赖�
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
-| v1.2 | 2026-07-26 | 新增 GOV 不变量、40 项文档事实 registry、不可复用 snapshot trailer、产品合同/oracle/治理基础设施/evidence 分层 registry、Authority change train、分阶段 Gate 计算和一文件一提交强制规则。 |
+| v1.2.1 | 2026-07-27 | 跨日后重新执行完整 registry 审计，分配 `GOV-REGISTRY-2026-07-27-01`，不复用前一快照 ID。 |
+| v1.2 | 2026-07-27 | 新增 GOV 不变量、40 项文档事实 registry、不可复用 snapshot trailer、产品合同/oracle/治理基础设施/evidence 分层 registry、Authority change train、分阶段 Gate 计算和一文件一提交强制规则。 |
 | v1.1 | 2026-07-26 | 增加 ADR、契约与发布分层门禁、规范性协议 Markdown、机器契约登记与变更流程、备份合同权威边界，收口账号/同步/家庭 ownership，并补全稳定编号 owner。 |
 | v1.0 | 2026-07-26 | 建立文档分层、权威关系、稳定编号、变更流程和阶段完成条件。 |
