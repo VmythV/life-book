@@ -5,7 +5,7 @@
 > Decision owners：客户端架构负责人、提醒负责人、安全负责人、质量负责人
 > Scope：P0 iOS/Android 本地系统通知，兼容 P1 多设备投递与远程推送去重
 > Related requirements：REM-001～132、REM-140～142、DOM-070～075、QR-003、QR-010、QR-030～031、QR-050～052、QR-070～072、QR-100～101、QR-110～112
-> Related ADRs：[TD-001](0001-mobile-client-stack.md)、[TD-002](0002-offline-first-client-architecture.md)、[TD-004](0004-device-key-hierarchy-and-app-lock.md)、[TD-006](0006-cross-platform-scalar-representations.md)、[TD-007](0007-time-recurrence-engine.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、[TD-012](0012-http-api-and-contract-versioning.md)、[TD-022](0022-remote-push-routing.md)
+> Related ADRs：[TD-001](0001-mobile-client-stack.md)、[TD-002](0002-offline-first-client-architecture.md)、[TD-004](0004-device-key-hierarchy-and-app-lock.md)、[TD-006](0006-cross-platform-scalar-representations.md)、[TD-007](0007-time-recurrence-engine.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、TD-012、TD-022
 > Decision gate：两平台真机能力探测、权限/重启/升级/时区矩阵、Expo 原生实现兼容测试、调度预算和全部中断点恢复测试通过后，才允许系统提醒进入公开构建
 
 ## Context
@@ -911,6 +911,7 @@ exact 权限不可用、channel 被关闭或平台行为不确定时自动回落
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-27 | 将尚未建立的 TD-012、TD-022 改为纯编号引用，保留 HTTP API 与远程推送的计划关系但不创建破链。 |
 | 2026-07-26 | 将 current evidence 升为 Installation/incarnation/epoch 三元 realm；request/payload/ActionInbox identity 升 v3，schedule/privacy/input/Decision 升 v2，并与 TD-004/TD-010 initialization v2 统一。 |
 | 2026-07-26 | 增加 NotificationDatasetState 单一 owner、runtime registered-pair digest 与全 pair revision fan-out；拆开 privacy comparison candidate/current evidence，固定全局 finalize、ActionInbox claim 耗尽和 TD-010 原子初始化/receipt 合同。 |
 | 2026-07-26 | 将 transport 纳入 lbr2/action 身份，增加隐私无关指纹与耐久 refresh marker、可恢复 ActionInbox claim、完整 restore state、revision 耗尽和无歧义 Decision/cleanup 优先级。 |
