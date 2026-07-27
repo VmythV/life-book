@@ -1,6 +1,6 @@
 # 生活有谱系统架构
 
-> 项目代号：`life-book` · 版本：v1.0 · 更新日期：2026-07-27 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.1 · 更新日期：2026-07-27 · 状态：文档基线
 >
 > 权威范围：系统上下文、逻辑组件、模块职责与依赖、运行入口、状态权威、数据流、故障隔离、部署视图和阶段扩展缝
 >
@@ -132,7 +132,7 @@ Deterministic Domain  ◄── Ports
 | `MobileBackgroundMaintenanceRoot` | P0 本地过门后 | 以窄 capability 执行持久任务、投影重建、提醒对账和清理；不得弹权限或认证。 |
 | `NotificationResponseRoot` | P0 本地过门后 | 有界解析系统输入，经过通知合同规定的 durable inbox/lease，再调用普通 command 或导航。 |
 | `PortabilityOperationRoot` | P0 本地后续切片 | 在独占 DatasetGate 下执行备份、恢复和导出。 |
-| `CapabilitySpikeRoot` | 工程骨架 | 只接合成数据验证原生能力；产物可删除且不得被产品入口依赖。 |
+| `CapabilitySpikeRoot` | 工程骨架 | 位于不进入普通产品 artifact 的独立 build variant/target 或 spike App，只接合成数据验证原生能力；产物可删除且不得被产品入口依赖。 |
 | `TestCompositionRoot` | 全阶段 | 注入固定 Clock/ID、内存 port、模拟平台状态和故障 adapter。 |
 | `ServerApiRoot` | P0 在线过门后 | 无状态 HTTP、admission、AI route；当前不得部署生产 route。 |
 | `ServerWorkerRoot` | P1 过门后 | outbox、对象任务、邮件和推送；P0 不部署。 |
@@ -152,7 +152,7 @@ Deterministic Domain  ◄── Ports
 | 系统通知请求 | OS 外部投影 | 平台接受请求不证明准时展示、用户已读或业务状态已改变。 |
 | 未提交表单与 AI 输入 | 当前会话内存 | 未经明确产品规则不进入业务库、日志、遥测或崩溃附件。 |
 | 导航、展开、临时选择 | Presentation 状态 | 进程内或不含内容的安全偏好。 |
-| P0 AI admission、quota、replay | TD-014 拟议的短期无内容状态 | 不是生活内容数据库或异步作业队列；TD-014 未接受前只可合成 spike。 |
+| P0 AI admission、quota、replay | 计划由尚未建立的 TD-014 决定 | 目标仅允许短期无内容状态，不是生活内容数据库或异步作业队列；TD-014 建立并接受前只可合成 spike。 |
 | P1 待同步业务写 | SQLite `SyncMutation` | 与本地 command 同事务；通用 task 只负责唤醒/传输。 |
 | P1 服务端账号、会话、membership、版本序列 | 服务端业务存储 | 精确 owner 等 TD-018～023；本表不冻结 Schema。 |
 | P1 云附件字节 | 对象存储 | 授权、状态和元数据在服务端业务存储；具体协议待阶段门。 |
@@ -309,6 +309,7 @@ P1 可以在区域边界内增加身份、同步、关系数据库、对象存�
 | 服务端运行行为 | `service-contracts.md` |
 | 威胁、分级、密钥、日志和隐私控制 | `security-and-privacy.md` |
 | 遥测事件与允许属性 | `analytics-and-telemetry.md` |
+| 实际第三方 route 的地区、处理条件与启用资格 | `third-party-services.md` |
 | 仓库、代码和依赖规则 | `engineering-standards.md` |
 | 里程碑和切片顺序 | `implementation-plan.md` |
 | 测试层级、矩阵和证据门 | `test-strategy.md` |
@@ -368,4 +369,5 @@ OQ-001/002/009 不阻止本地骨架和合成 spike，但分别阻止生产区�
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.1 | 2026-07-27 | 修正 TD-014 的缺失状态，登记第三方服务 owner，并把 capability spike 固定到独立构建入口。 |
 | v1.0 | 2026-07-27 | 建立全阶段上下文、移动模块与入口、状态权威、数据流、故障隔离和阶段门；定义不产生长期数据的永久工程骨架边界。 |
