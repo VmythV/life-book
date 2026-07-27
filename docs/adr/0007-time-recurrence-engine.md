@@ -5,7 +5,7 @@
 > Decision owners：客户端架构负责人、领域负责人、质量负责人  
 > Scope：P0～P2 公历日期运算、IANA 时区解析、重复候选、发生项身份、时间重算和时区数据升级  
 > Related requirements：REC-001～003、REC-020～023、REC-030～042、REC-050～083、REC-090～102、REC-110～121、DOM-010～011、QR-021～023、QR-090～091  
-> Related ADRs：[TD-002](0002-offline-first-client-architecture.md)、[TD-006](0006-cross-platform-scalar-representations.md)、[TD-009](0009-local-notification-scheduling.md)、[TD-010](0010-snapshot-schema-and-migrations.md)、[TD-018](0018-sync-protocol-and-conflict-resolution.md)  
+> Related ADRs：[TD-002](0002-offline-first-client-architecture.md)、[TD-006](0006-cross-platform-scalar-representations.md)、[TD-009](0009-native-reminder-scheduler.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、TD-020、TD-028
 > Decision gate：双平台真机、独立参考实现、IANA tzdb 差分和全部 `REC-T*` fixture 通过后，才允许提醒与重复事项进入功能验收
 
 ## Context
@@ -77,7 +77,7 @@ interface TimeEnginePort {
 - 只通过内部 `CalendarMath`/`ZoneResolver` adapter 使用 `LocalDate`、`LocalTime`、`LocalDateTime`、`YearMonth`、`Instant`、`Duration`、`ZoneId` 和 `ZoneRules`；业务 feature 不直接 import js-joda；
 - 领域仍使用 TD-006 标量，不把 js-joda object 写入 Redux/query cache、SQLite、JSON、原生 bridge 或日志；
 - 构造月日先用 `YearMonth.lengthOfMonth/isValidDay` 验证，再创建 `LocalDate`；不能调用会把无效日夹到月末的便捷运算实现 REC-062/063；
-- 日历固定 ISO/proleptic Gregorian。P1 农历由 TD-024 独立 adapter 提供，不能更改 P0 kernel 的公历含义；
+- 日历固定 ISO/proleptic Gregorian。P1 农历重要日期由计划中的 TD-028 独立 adapter 提供，不能更改 P0 kernel 的公历含义，也不能扩展为通用任务重复规则；
 - 禁止 `LocalDate.now()`、`ZonedDateTime.now()`、`ZoneId.systemDefault()` 和任何无显式 clock/zone 的重载；
 - js-joda/core、provider 或数据升级必须对旧版本跑 REC fixture、合法/非法输入和随机 differential；不能按设备动态选择两个实现。
 
@@ -209,7 +209,7 @@ occ:v1:<recordId>:<segmentId>:<YYYY-MM-DD>:t:<HH:mm:ss>
 - 仅本次改期保留 original key，并只改变 `effectiveSchedule`；
 - v1 语义若必须改变到会产生不同候选 identity，新增 `occ:v2`/engine interpreter 或先把受影响旧候选物化，不能原地复用 key。
 
-重要日期使用独立 `date-occ:v1:<recordId>:<targetYear>:<calendar>` key；P0 calendar 固定 `gregorian`。P1 农历 ADR 必须扩展足以区分闰月/规则版本的 identity，不能套用公历 key。
+重要日期使用独立 `date-occ:v1:<recordId>:<targetYear>:<calendar>` key；P0 calendar 固定 `gregorian`。P1 的 TD-028 必须扩展足以区分闰月和规则版本的 identity，不能套用公历 key。
 
 ### 6. 查询、分页与资源上限
 
@@ -257,7 +257,7 @@ emittedCountFromRuleStart（count 模式）
 - 未互动候选是可重建 projection，不具有随机 EntityId；key 即其稳定引用；
 - 完成、跳过、取消、改期、添加本次说明、产生提醒或被同步/冲突引用时，在同一事务物化 Occurrence；
 - materialized occurrence 保存 `originalSchedule`、`effectiveSchedule`、`occurrenceKey`、segment/rule revision、engine version；
-- timed 历史还保存解析得到的 `resolvedInstant`、`resolvedTimeZoneId`、`resolvedUtcOffsetSeconds`、`resolvedTzdbVersion` 和 `resolution`；物理 schema 在 TD-012 固化；
+- timed 历史还保存解析得到的 `resolvedInstant`、`resolvedTimeZoneId`、`resolvedUtcOffsetSeconds`、`resolvedTzdbVersion` 和 `resolution`；物理结构由计划中的 `../persistence-schema.md` 固化；
 - `originalSchedule` 与上述历史解析结果一旦发生/终态后不可因引擎或 tzdb 升级改写；
 - pending 未来 occurrence 可在保留同 key/override 的前提下更新解析 projection；如果用户已仅本次改期，按 effective schedule 自身语义解析；
 - 规则修改先建立新 segment/override，再让 projection diff 产生取消/新增提醒任务；不能先删除未来实例后尝试重建；
@@ -470,4 +470,5 @@ API 方便且 bundle 小，但 offset 依赖设备 ICU/tzdb。不同 OS 补丁�
 
 | Date | Version | Change |
 | --- | --- | --- |
+| 2026-07-27 | v1.1 | 归一 TD-009/010 文件名，将同步协议、物理 Schema 和 P1 农历重要日期 adapter 的计划归属分别校正为 TD-020、`persistence-schema.md` 和 TD-028；不改变已接受的 P0 算法。 |
 | 2026-07-26 | v1.0 | 固化 js-joda 公历/ZoneRules、bundled IANA tzdb、P0 recurrence kernel、identity、升级和验证策略。 |
