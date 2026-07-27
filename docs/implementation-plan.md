@@ -1,6 +1,6 @@
 # 生活有谱实施计划
 
-> 项目代号：`life-book` · 版本：v1.0 · 更新日期：2026-07-27 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.1 · 更新日期：2026-07-27 · 状态：文档基线
 >
 > 权威范围：无日期里程碑、依赖关系、纵向切片顺序、工作包、角色 owner、进入/退出条件和完成定义
 >
@@ -46,14 +46,16 @@ M1 正式本地合同与验收基础
               ▼
 M2 首个纵向切片：带提醒的重复事项
               │
-              ├── M3 五类记录、整理、搜索与今天
+              ▼
+M3 五类记录、整理、搜索与今天
               │
-              └── M4 附件、数据生命周期、备份与恢复
-                       │
-                       ▼
-              M5 P0 本地闭环硬化
-                       │
-          ┌────────────┴────────────┐
+              ▼
+M4 附件、数据生命周期、备份与恢复
+              │
+              ▼
+M5 P0 本地闭环硬化
+              │
+          ┌───┴─────────────────────┐
           ▼                         ▼
 M6 P0 在线智能（独立开门）   本地闭环继续离线可用
           │
@@ -64,7 +66,7 @@ M7 P0 候选、内测与公开发布门
 P1 独立切片 → P2 独立切片
 ```
 
-M0 代码与 M1 文档/合同设计可以由不同 owner 并行，但 M2 必须同时继承两者的通过结果。M6 不能阻塞 M2～M5 的本地实现；P0 正式范围仍以路线图为准，只有 M6 关闭或通过策略获得新的产品决定时，才能改变 P0 发布承诺。
+M0 代码与 M1 文档/合同设计可以由不同 owner 并行，但 M2 必须同时继承两者的通过结果。M4 的附件/备份合同准备可与 M3 并行；产品附件实现必须等 IMP-302 备忘和 IMP-304 家庭物品切片存在，M5 同时继承 M3、M4 的完成结果。M6 不能阻塞 M2～M5 的本地实现；P0 正式范围仍以路线图为准，只有 M6 关闭或通过策略获得新的产品决定时，才能改变 P0 发布承诺。
 
 ## 3. 角色与责任
 
@@ -128,7 +130,7 @@ M0 只需满足：
 - OQ-003 已按 TD-001 关闭，OQ-008 只阻塞日期；
 - 工作树干净且没有生产 secret/真实内容。
 
-它不要求 persistence/API/notification/backup 合同或实现 evidence，因为 M0 不产生这些格式和流量。
+它不要求 persistence/API/notification/backup 合同或实现 evidence，因为 M0 不产生需要长期兼容的生产格式、真实用户数据或真实外部服务流量；独立 spike 可以产生可删除的合成库、文件和本地平台请求。
 
 ### 5.2 第一批可执行工作包
 
@@ -141,7 +143,7 @@ M0 只需满足：
 | IMP-104 | 工程门 | format、lint、strict typecheck、unit、architecture、docs/deps/secret/generate checks。 | 根 `pnpm verify` 与生成后 clean 检查通过。 |
 | IMP-105 | CI 基础 | frozen install、缓存边界、required checks、双平台条件构建。 | CI 只调用根 scripts；失败不能被空 no-op 标绿。 |
 | IMP-106 | 合成测试支撑 | fixed Clock/ID/Random、fake/fault adapters、privacy canary。 | production graph 不能 import test-support，测试默认无外网。 |
-| IMP-107 | TD-001 capability spike | 独立 spike root 覆盖加密库/文件、通知、密钥、文件分享、生命周期、a11y、诊断。 | 按测试策略第 5 节留证；可整体删除且不影响普通构建。 |
+| IMP-107 | TD-001 capability spike | 不进入普通产品 artifact 的独立 build variant/target 或 spike App，覆盖加密库/文件、通知、密钥、文件分享、生命周期、a11y、诊断。 | 按测试策略第 5 节留证；可整体删除且不影响普通构建。 |
 
 建议执行顺序为 IMP-100 → 101 → 102/103 → 104/105/106；IMP-107 在基础 build 可运行后并行展开。每个工作包可以拆成小 PR，但拆分不能留下主分支不可安装、不可验证或默认接通未过门能力。
 
@@ -177,7 +179,7 @@ M2 至少需要下列成套结果，精确路径与身份以治理 registry 为�
 
 | 编号 | 合同族 | 必须成套的内容 |
 | --- | --- | --- |
-| IMP-120 | Scalar | `specs/scalars/v1.md`、manifest、golden/negative，覆盖 ID、Instant/LocalDate/Time、ExactDecimal、SortKey、Revision/LongCounter。 |
+| IMP-120 | Scalar | `specs/scalars/v1.md`、manifest、golden/negative，覆盖 EntityId、Instant、LocalDate、LocalTime、TimeZoneId、ExactDecimal、SortKey、Revision、LongCounter。 |
 | IMP-121 | Installation security | installation anchor、device-key envelope 的协议 + Schema、fixtures 与 bootstrap/partial/错误 key oracle。 |
 | IMP-122 | Persistence | active/portable SQL、SQLCipher profiles、DatasetControl、migration manifest、mapper fixtures 与 kill-point 预期。 |
 | IMP-123 | Time | tzdb manifest/资产 identity、recurrence fixtures、DST/月末/闰年/升级 oracle。 |
@@ -247,6 +249,8 @@ M3 不含附件 bytes、通用关联、账号、农历、家庭协作、AI 增�
 
 ## 9. M4：附件、数据生命周期、备份与恢复
 
+M4 合同/oracle 可以在 M3 期间准备；产品实现以 IMP-302 的备忘和 IMP-304 的家庭物品为入口依赖，并在 M3 完成后收敛。不得为了提前验证附件而创建脱离正式 Record owner 的临时业务实体。
+
 ### 9.1 附件切片
 
 在 private attachment contract/oracle 通过后，先交付备忘图片/文件和物品主图：选择 → 加密暂存 → 校验 → 事务绑定 → 原子提升 → 缩略图/清理。覆盖取消、文件 provider 丢失、超限、空间不足、kill points 和引用一致性。其他记录类型附件仍按路线图后置。
@@ -281,7 +285,7 @@ M5 退出后可以得到完整的 P0 **本地手动候选**，但不能称为路
 ### 11.1 进入条件
 
 - TD-012～017 全部 `Accepted`；
-- `service-contracts.md`、`security-and-privacy.md`、`analytics-and-telemetry.md`、`observability-and-operations.md`、`release-operations.md` 和第三方服务处理清单达到各自 Gate；
+- `service-contracts.md`、`security-and-privacy.md`、`analytics-and-telemetry.md`、`observability-and-operations.md`、`release-operations.md` 和 `third-party-services.md` 达到各自 Gate；
 - `specs/api/openapi.yaml`、AI Schema/fixtures、API/telemetry 合同和 oracle PASS；
 - OQ-001/002 对内部合成环境可暂不关闭，但 production route/真实内容/公开测试仍保持阻塞；
 - provider、地区、用途、训练/留存/删除和合同证据逐 route 核验。
@@ -304,7 +308,7 @@ M5 退出后可以得到完整的 P0 **本地手动候选**，但不能称为路
 
 ### 12.1 交付文档
 
-首次内部分发前至少完成 TD-017 和 `release-operations.md`；公开测试/发布前完成 `observability-and-operations.md`、`legal-and-compliance.md`、`support-playbook.md`、第三方服务处理清单、隐私/权限披露与品牌核验。运营主体、联系方式、地区和名称受 OQ-001/002/009 阻塞。
+首次内部分发前至少完成 TD-017 和 `release-operations.md`；公开测试/发布前完成 `observability-and-operations.md`、`legal-and-compliance.md`、`support-playbook.md`、`third-party-services.md`、隐私/权限披露与品牌核验。运营主体、联系方式、地区和名称受 OQ-001/002/009 阻塞。
 
 ### 12.2 候选门
 
@@ -378,4 +382,5 @@ P2 在相关 P1 基础稳定、TD-024～027 与授权/API/内容合同过门后�
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.1 | 2026-07-27 | 修正 M3→M4→M5 依赖与附件入口，完整列出 scalar 合同范围，收窄 M0 格式/流量表述并固定第三方服务 owner。 |
 | v1.0 | 2026-07-27 | 建立无日期里程碑、M0 永久骨架首批工作包、正式本地合同轨、首个纵向切片及 P0 在线/P1/P2 后继门。 |
