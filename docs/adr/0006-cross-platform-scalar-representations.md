@@ -5,7 +5,7 @@
 > Decision owners：客户端架构负责人、服务端架构负责人、数据负责人  
 > Scope：P0～P2 领域对象、SQLite、JSON/HTTP、备份、同步和服务端之间的基础标量  
 > Related requirements：领域模型 §2、REC-001～003、REC-020～023、BR-082、SYNC-032、SYNC-034、QR-022、QR-090～091、QR-110  
-> Related ADRs：[TD-002](0002-offline-first-client-architecture.md)、[TD-003](0003-encrypted-local-database.md)、[TD-007](0007-time-recurrence-engine.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、[TD-014](0014-api-style-and-contract-versioning.md)
+> Related ADRs：[TD-002](0002-offline-first-client-architecture.md)、[TD-003](0003-encrypted-local-database.md)、[TD-007](0007-time-recurrence-engine.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、TD-012
 > Decision gate：跨 TypeScript、SQLite、备份和服务端的兼容 fixture 全部通过后，才允许冻结首个持久化 schema
 
 ## Context
@@ -354,6 +354,7 @@ SQLite 自身能保存 signed 64-bit，但当前 JS bridge 会把值暴露为 `n
 
 | Date | Version | Change |
 | --- | --- | --- |
+| 2026-07-27 | v1.3 | 将旧的“API 与契约版本”关系从误占的 TD-014 归一到计划中的 TD-012；目标 ADR 尚未建立，因此暂不创建文件链接。 |
 | 2026-07-26 | v1.2 | 统一 controlSequence、dataMutationCounter、notificationDatasetEpoch 与同步/账本的 signed-64 LongCounter 范围和溢出门，并修正 TD-010 链接。 |
 | 2026-07-26 | v1.1 | 消除 Hermes 原生 BigInt 假设，固定客户端 ExactInteger/JSBI adapter，保持跨端编码不变。 |
 | 2026-07-26 | v1.0 | 固化跨端 ID、时间、精确十进制、排序键、版本/序列和 canonical encoding。 |
