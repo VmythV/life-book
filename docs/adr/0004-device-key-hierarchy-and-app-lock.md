@@ -5,7 +5,7 @@
 > Decision owners：安全负责人、移动端技术负责人  
 > Scope：P0 安装锚点、设备静态加密与应用锁，并约束 P1/P2 设备密钥延续<br>
 > Related requirements：PD-006、PR-500～502、DATA-001、DATA-021～022、DATA-045、DATA-090～092、QR-070～072、FLOW-130～131、SCR-002、SCR-451、SCR-903<br>
-> Related ADRs：[TD-003](0003-encrypted-local-database.md)、[TD-005](0005-encrypted-attachment-store.md)、[TD-006](0006-cross-platform-scalar-representations.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、[TD-011](0011-backup-container-and-cryptography.md)、[TD-019](0019-account-authentication-and-device-sessions.md)<br>
+> Related ADRs：[TD-003](0003-encrypted-local-database.md)、[TD-005](0005-encrypted-attachment-store.md)、[TD-006](0006-cross-platform-scalar-representations.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、[TD-011](0011-backup-container-and-cryptography.md)、TD-019<br>
 > Decision gate：实现必须完成威胁模型、双平台真机 key-loss/credential-change、presence/bootstrap 双槽、clear/reinstall 与 active-anchor kill-point 测试和独立安全评审；P0 不提供产品方密钥找回
 
 ## Context
@@ -437,6 +437,7 @@ App 无法读取设备密码；自定义 PIN 熵低且需要找回/限次/迁移
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-27 | 将尚未建立的 TD-019 改为纯编号引用，保留账号与设备会话的计划关系但不创建破链。 |
 | 2026-07-26 | 新增独立 InstallationAnchorKey、presence/bootstrap 精确双槽格式、稳定 bootstrap/可变 active operation、sequence headroom、clear/reinstall incarnation 与 activation-abort/active-anchor CAS。 |
 | 2026-07-26 | 加入 DatasetControlKey，移除单一 BackupKey，按 TD-011 分离备份 root/用途 key/SnapshotDataKey，并固定两遍恢复不改变接收设备 key hierarchy。 |
 | 2026-07-26 | 接受随机分层密钥、this-device-only 包装、原生 Key Manager、应用锁 session 和操作级近期认证。 |
