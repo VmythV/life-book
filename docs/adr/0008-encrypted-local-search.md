@@ -5,7 +5,7 @@
 > Decision owners：客户端数据负责人、搜索负责人、安全负责人  
 > Scope：P0 移动端离线搜索，兼容 P1/P2 空间权限、同步重建和字段扩展  
 > Related requirements：PR-400～403、SRCH-001～101、DOM-001～002、BR-020～021、QR-011、QR-020、QR-022、QR-030、QR-070～071、QR-090～091、QR-100～101  
-> Related ADRs：[TD-002](0002-offline-first-client-architecture.md)、[TD-003](0003-encrypted-local-database.md)、[TD-006](0006-cross-platform-scalar-representations.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、[持久化 Schema](../persistence-schema.md)
+> Related ADRs：[TD-002](0002-offline-first-client-architecture.md)、[TD-003](0003-encrypted-local-database.md)、[TD-006](0006-cross-platform-scalar-representations.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、计划中的 `../persistence-schema.md`
 > Decision gate：目标 SQLCipher build 的 FTS 能力探测、Expo 关闭连接缺陷规避、双槽崩溃恢复、安全删除、敏感竞态和设计容量真机基准全部通过后，才允许搜索进入公开构建
 
 ## Context
@@ -68,7 +68,7 @@ Domain transaction
 
 ### 2. 物理投影
 
-[持久化 Schema](../persistence-schema.md)固化具体 DDL；逻辑表和约束如下。搜索表只在当前 active generation 的 SQLCipher 数据库内共享业务连接、key 和领域任务事务，不因此进入用户 portable 备份边界。TD-010 current-device capture/本地 rollback checkpoint 可以物理克隆它们；portable projector 必须排除全部搜索对象。
+计划中的 `../persistence-schema.md` 固化具体 DDL；逻辑表和约束如下。搜索表只在当前 active generation 的 SQLCipher 数据库内共享业务连接、key 和领域任务事务，不因此进入用户 portable 备份边界。TD-010 current-device capture/本地 rollback checkpoint 可以物理克隆它们；portable projector 必须排除全部搜索对象。
 
 #### 2.1 元数据和文档
 
@@ -539,5 +539,6 @@ PRAGMA compile_options
 
 | Date | Version | Change |
 | --- | --- | --- |
+| 2026-07-27 | v1.2 | 在持久化 Schema 文档建立前将两处依赖改为非链接路径，保留物理 DDL 的计划权威归属但不创建破链。 |
 | 2026-07-26 | v1.1 | 对齐 TD-010：portable 永不携带搜索；分离数据集/索引 generation 与全局/搜索 counter；冻结 activation 关闭和 projection-reset 协议。 |
 | 2026-07-26 | v1.0 | 固化 SQLCipher 内 trigram + short-gram 混合索引、Unicode pipeline、A/B 重建、排名、安全和平台门。 |
