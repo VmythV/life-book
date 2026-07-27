@@ -1,6 +1,6 @@
 # 生活有谱技术决策记录索引
 
-> 项目代号：`life-book` · 版本：v1.2 · 更新日期：2026-07-27 · 状态：持续维护
+> 项目代号：`life-book` · 版本：v1.3 · 更新日期：2026-07-27 · 状态：持续维护
 >
 > 权威范围：ADR 编号、存在性、状态、日期、固定结构、依赖、接受/替代流程与技术决策阶段门
 >
@@ -113,7 +113,7 @@ ADR 从 `Proposed` 进入 `Accepted` 前必须满足：
 
 ### 5.1 已存在 ADR
 
-下表只登记文件和页首能够证明的事实。现有 11 份 ADR 均已接受；尚无独立 Review date。
+下表只登记文件和页首能够证明的事实。现有 12 份 ADR 中 11 份为 `Accepted`、1 份为 `Proposed`；尚无独立 Review date。
 
 | ID | ADR | Exists | ADR Status | Decision date | Review date | Phase |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -128,14 +128,14 @@ ADR 从 `Proposed` 进入 `Accepted` 前必须满足：
 | TD-009 | [原生提醒调度与平台通知适配](0009-native-reminder-scheduler.md) | `PRESENT` | `Accepted` | 2026-07-26 | `—` | P0 本地通知，兼容 P1 远程推送 |
 | TD-010 | [SQLite 快照、迁移与原子恢复](0010-sqlite-snapshot-migration-and-atomic-restore.md) | `PRESENT` | `Accepted` | 2026-07-26 | `—` | P0～P2 初始化、迁移与恢复 |
 | TD-011 | [备份容器与密码学](0011-backup-container-and-cryptography.md) | `PRESENT` | `Accepted` | 2026-07-26 | `—` | P0～P2 `.lifebook` 备份 |
+| TD-012 | [HTTP API 与契约版本](0012-http-api-and-contract-versioning.md) | `PRESENT` | `Proposed` | `—` | `—` | P0 online，等待威胁模型与工具矩阵接受门 |
 
 ### 5.2 已预留、尚缺失的 ADR
 
-下表所有条目当前均为 `MISSING`。`Planned disposition` 只规定建文档时的初始生命周期位置，不能当作正式 ADR Status。
+下表其余 16 个预留条目当前均为 `MISSING`。`Planned disposition` 只规定建文档时的初始生命周期位置，不能当作正式 ADR Status。
 
 | ID | 计划标题与路径 | Exists | ADR Status | Decision date | Review date | Phase | Planned disposition |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| TD-012 | HTTP API 与契约版本；`0012-http-api-and-contract-versioning.md` | `MISSING` | `—` | `—` | `—` | P0 online | `Proposed` |
 | TD-013 | 智能网关与供应商路由；`0013-ai-gateway-and-provider-routing.md` | `MISSING` | `—` | `—` | `—` | P0 online | `Proposed` |
 | TD-014 | 匿名服务访问与防滥用；`0014-anonymous-service-access-and-abuse-control.md` | `MISSING` | `—` | `—` | `—` | P0 online | `Proposed` |
 | TD-015 | 后端运行时与服务拓扑；`0015-backend-runtime-and-service-topology.md` | `MISSING` | `—` | `—` | `—` | P0 online | `Proposed` |
@@ -225,7 +225,7 @@ ADR 从 `Proposed` 进入 `Accepted` 前必须满足：
 当前 ADR 目录中的本地 Markdown 链接均指向已存在文件，旧编号、旧文件名和未建立 ADR 的前向破链已经归一。仍有以下真实依赖缺件：
 
 - TD-008 需要 `../persistence-schema.md` 固化物理 DDL；该文件尚未建立，因此正文只保留非链接路径。依赖语义成立，但当前不存在可引用的物理 Schema owner。
-- TD-012～028 仍是第 5.2 节登记的计划文档；现有 ADR 只用纯 `TD-*` 表示未来关系。每份目标 ADR 提交后，才能在独立的来源 ADR 修订中恢复链接。
+- TD-013～028 仍是第 5.2 节登记的计划文档；现有 ADR 只用纯 `TD-*` 表示未来关系。每份目标 ADR 提交后，才能在独立的来源 ADR 修订中恢复链接。
 
 引用修复只能校正编号、路径、权威 owner 和 `Revision notes`，不得借勘误静默改变 ADR 决定；如果含义确实改变，必须新建替代 ADR。
 
@@ -255,6 +255,7 @@ ADR 从 `Proposed` 进入 `Accepted` 前必须满足：
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.3 | 2026-07-27 | 登记 TD-012 已存在且状态为 Proposed；剩余预留缺失范围收敛为 TD-013～028。 |
 | v1.2 | 2026-07-27 | 记录既有 ADR 的旧编号与前向破链已逐文件修复；保留持久化 Schema 和 TD-012～028 的真实依赖缺件。 |
 | v1.1 | 2026-07-27 | 按仓库事实重建 28 项登记；区分存在性、ADR 状态、决定/复审日期、前置/关联关系与实施门；新增 TD-028，并登记现存引用修复队列。 |
 | v1.0 | 2026-07-26 | 建立 ADR 状态、固定结构、接受门、27 项技术决策索引、阶段依赖和未决事项映射。 |
