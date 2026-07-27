@@ -5,7 +5,7 @@
 > Decision owners：移动端技术负责人、架构负责人  
 > Scope：P0 iOS/Android 客户端，并约束 P1/P2 移动端延续  
 > Related requirements：PD-001、PD-002、PD-006、QR-001～003、QR-010～012、QR-080～082、QR-110～112  
-> Related ADRs：[TD-002](0002-offline-first-client-architecture.md)、[TD-003](0003-encrypted-local-database.md)、[TD-009](0009-native-reminder-scheduler.md)、[TD-017](0017-build-release-and-update-boundaries.md)  
+> Related ADRs：[TD-002](0002-offline-first-client-architecture.md)、[TD-003](0003-encrypted-local-database.md)、[TD-009](0009-native-reminder-scheduler.md)、TD-017
 > Decision gate：采用 OQ-003 的默认值；若工程骨架建立前出现明确团队能力或关键原生能力反证，必须以新 ADR 替代
 
 ## Context
@@ -171,4 +171,5 @@ ADR 不固定会过期的框架小版本。创建工程和每次升级时：
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-27 | 将尚未建立的 TD-017 改为纯编号引用，避免把计划关系伪装成可访问 ADR。 |
 | 2026-07-26 | 接受 React Native + Expo Development Build/CNG + TypeScript，明确 New Architecture、Hermes、原生扩展和能力 spike 门。 |
