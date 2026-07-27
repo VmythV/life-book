@@ -5,7 +5,7 @@
 > Decision owners：客户端架构负责人、领域负责人  
 > Scope：P0～P2 移动客户端的模块、依赖、状态、事务与副作用边界  
 > Related requirements：PD-002、PD-009、PD-015、QR-030～042、QR-110～112、DATA-002、BR-001～003  
-> Related ADRs：[TD-001](0001-mobile-client-stack.md)、[TD-003](0003-encrypted-local-database.md)、[TD-009](0009-native-reminder-scheduler.md)、[TD-020](0020-incremental-sync-protocol.md)  
+> Related ADRs：[TD-001](0001-mobile-client-stack.md)、[TD-003](0003-encrypted-local-database.md)、[TD-009](0009-native-reminder-scheduler.md)、TD-020
 > Decision gate：无开放产品决定；首个纵向切片必须用真实事务与失败注入验证本决定
 
 ## Context
@@ -270,4 +270,5 @@ P0 从第一条数据开始采用此结构，不建立临时页面直写数据�
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-27 | 将尚未建立的 TD-020 改为纯编号引用，保留同步协议的计划关系但不创建破链。 |
 | 2026-07-26 | 接受模块化单体、依赖向内、本地事实源、命令/查询和持久副作用任务架构。 |
