@@ -1,6 +1,6 @@
 # 生活有谱文档治理规范
 
-> 项目代号：`life-book` · 版本：v1.2.1 · 更新日期：2026-07-27 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.3 · 更新日期：2026-07-27 · 状态：文档基线
 >
 > 权威范围：文档类型、唯一职责、状态、版本、稳定编号、权威关系、机器契约登记、变更流程与阶段门
 >
@@ -145,6 +145,7 @@ ADR 不使用上述中文状态，其 `Status` 只允许 `Proposed`、`Accepted`
 | `security-and-privacy.md` | 威胁模型、数据分级、权限、密钥、日志和安全控制 |
 | `engineering-standards.md` | 代码组织、配置、迁移、依赖、分支和评审约束 |
 | `analytics-and-telemetry.md` | 可采集事件、禁止属性、同意、保留和指标映射 |
+| `third-party-services.md` | 实际第三方服务、route、数据类别、地区、训练/留存/删除、合同、子处理者和启用资格登记 |
 
 ### 4.6 交付与运营层
 
@@ -160,22 +161,22 @@ ADR 不使用上述中文状态，其 `Status` 只允许 `Proposed`、`Accepted`
 
 ### 4.7 文档存在性与准入 Registry
 
-本节是 `GOV-REGISTRY-2026-07-27-01` 的事实快照，覆盖 26 份 `docs/` 根目录文档、1 份 ADR 索引和本规范已登记但尚缺失的 13 份文档，共 40 项。快照锚点是**首次提交该 snapshot ID 时修改本文件的 Git 提交**；提交后用 `git log --format=%H --fixed-strings --grep='Registry-Snapshot: GOV-REGISTRY-2026-07-27-01' -1` 解析其不可变 SHA，避免在文件内写入会改变自身提交 SHA 的循环引用。提交信息必须带唯一 trailer `Registry-Snapshot: GOV-REGISTRY-2026-07-27-01`；以后任何修改本文件都必须完整重审 registry、分配未使用的新 snapshot ID 和新 trailer，绝不让旧 ID 自动漂移到另一 SHA。只要登记范围内工作树不清洁，或锚点后任一登记路径发生变化，快照即为 `STALE`，所有由它推导的 `PASS` 暂停生效，直到重审本节并以新快照提交。“文档 Gate”只表示该文件能否计入声明的 Gate scope；不替代其引用的 OQ、ADR、机器合同或实现证据门。
+本节是 `GOV-REGISTRY-2026-07-27-02` 的事实快照，覆盖 30 份 `docs/` 根目录文档、1 份 ADR 索引和本规范已登记但尚缺失的 10 份文档，共 41 项。快照锚点是**首次提交该 snapshot ID 时修改本文件的 Git 提交**；提交后用 `git log --format=%H --fixed-strings --grep='Registry-Snapshot: GOV-REGISTRY-2026-07-27-02' -1` 解析其不可变 SHA，避免在文件内写入会改变自身提交 SHA 的循环引用。提交信息必须带唯一 trailer `Registry-Snapshot: GOV-REGISTRY-2026-07-27-02`；以后任何修改本文件都必须完整重审 registry、分配未使用的新 snapshot ID 和新 trailer，绝不让旧 ID 自动漂移到另一 SHA。只要登记范围内工作树不清洁，或锚点后任一登记路径发生变化，快照即为 `STALE`，所有由它推导的 `PASS` 暂停生效，直到重审本节并以新快照提交。“文档 Gate”只表示该文件能否计入声明的 Gate scope；不替代其引用的 OQ、ADR、机器合同或实现证据门。
 
 #### 4.7.1 治理、方向与范围
 
 | 文件 | Exists | 页首 raw status | Status check | Evidence | 目标合法状态 | Gate scope | 文档 Gate | 依赖、安全默认与后继门 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | [documentation-governance.md](documentation-governance.md) | `PRESENT` | 文档基线 | `VALID` | `NOT_REQUIRED` | 文档基线 | 全阶段文档治理 | `PASS` | 本文定义门；各阶段仍继承对应专项门。 |
-| [adr/README.md](adr/README.md) | `PRESENT` | 技术决策治理基线 | `INVALID` | `NOT_REQUIRED` | 持续维护 | P0 技术决策治理 | `BLOCKED` | 页首待归一，且 TD-001～011 实际 `Accepted` 与索引“待建立”冲突。 |
+| [adr/README.md](adr/README.md) | `PRESENT` | 持续维护 | `VALID` | `NOT_REQUIRED` | 持续维护 | 全阶段技术决策治理 | `PASS` | TD-001～011 为 `Accepted`，TD-012/013 为 `Proposed`，TD-014～028 保持 `MISSING`；索引与正文一致。 |
 | [brand-name.md](brand-name.md) | `PRESENT` | 产品命名基线；商标与渠道可用性待外部核验 | `INVALID` | `NOT_REQUIRED` | 待确认 | P0 公开品牌 | `BLOCKED` | 内部产品设计沿用 OQ-009 默认且不阻塞；商店提交/公开投放被 OQ-009 阻塞。 |
 | [product-decisions.md](product-decisions.md) | `PRESENT` | 持续维护 | `VALID` | `NOT_REQUIRED` | 持续维护 | 全阶段产品决策治理 | `PASS` | 产品型 OQ 的关闭证据 owner；各能力仍继承其专项门。 |
-| [product-features.md](product-features.md) | `PRESENT` | 产品需求基线 | `INVALID` | `NOT_REQUIRED` | 文档基线 | P0 需求 | `BLOCKED` | 实现切片继承路线图和相应 ADR/合同门。 |
-| [roadmap.md](roadmap.md) | `PRESENT` | 阶段范围基线 | `INVALID` | `NOT_REQUIRED` | 文档基线 | 全阶段范围 | `BLOCKED` | 必须按 OQ-001/002/006/008/009 的实际阻塞阶段和 ADR 阶段门归一。 |
-| [open-questions.md](open-questions.md) | `PRESENT` | 持续维护 | `VALID` | `NOT_REQUIRED` | 持续维护 | 全阶段未决治理 | `BLOCKED` | OQ-103/108/109 仍引用不存在的 `intelligence-spec.md`，且 OQ-101～110 待补显式状态/关闭证据；只登记默认与阻塞，不替代关闭证据 owner。 |
+| [product-features.md](product-features.md) | `PRESENT` | 文档基线 | `VALID` | `NOT_REQUIRED` | 文档基线 | 全阶段需求 | `PASS` | 实现切片仍继承路线图和相应 ADR/合同门。 |
+| [roadmap.md](roadmap.md) | `PRESENT` | 文档基线 | `VALID` | `NOT_REQUIRED` | 文档基线 | 全阶段范围 | `PASS` | 已按本地、在线、同步、农历和 P2 分切片声明门；OQ-008 只阻塞日期。 |
+| [open-questions.md](open-questions.md) | `PRESENT` | 持续维护 | `VALID` | `NOT_REQUIRED` | 持续维护 | 全阶段未决治理 | `PASS` | 已关闭项有 owner/证据，开放项有安全默认和阻塞阶段；不替代专项关闭证据。 |
 | [product-validation.md](product-validation.md) | `PRESENT` | 文档基线 | `VALID` | `NOT_REQUIRED` | 文档基线 | P0 发现 | `PASS` | OQ-008 只阻塞日历承诺，不阻塞依赖里程碑。 |
 | [success-metrics.md](success-metrics.md) | `PRESENT` | 指标基线 | `INVALID` | `NOT_REQUIRED` | 文档基线 | P0 测量设计 | `BLOCKED` | 真实采集继承 TD-016、用户同意与法律门；OQ-001/002 只阻塞公开真实数据。 |
-| [quality-attributes.md](quality-attributes.md) | `PRESENT` | 质量基线 | `INVALID` | `NOT_REQUIRED` | 文档基线 | P0 质量目标 | `BLOCKED` | 作为 ADR、测试和发布门输入；自身状态归一后不替代实现 evidence。 |
+| [quality-attributes.md](quality-attributes.md) | `PRESENT` | 文档基线 | `VALID` | `NOT_REQUIRED` | 文档基线 | 全阶段质量目标 | `PASS` | 作为 ADR、测试和发布门输入；叙事 PASS 不替代实现 evidence。 |
 
 #### 4.7.2 体验与内容
 
@@ -195,39 +196,40 @@ ADR 不使用上述中文状态，其 `Status` 只允许 `Proposed`、`Accepted`
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | [domain-model.md](domain-model.md) | `PRESENT` | 文档基线 | `VALID` | `NOT_REQUIRED` | 文档基线 | P0 本地域 | `PASS` | P1 同步映射继承 OQ-006、TD-020/022/023，不反向阻塞 P0。 |
 | [business-rules.md](business-rules.md) | `PRESENT` | 业务规则基线 | `INVALID` | `NOT_REQUIRED` | 文档基线 | P0 本地规则 | `BLOCKED` | 同步/家庭规则继承 OQ-006、TD-020/024。 |
-| [time-and-recurrence.md](time-and-recurrence.md) | `PRESENT` | 时间规则基线 | `INVALID` | `NOT_REQUIRED` | 文档基线 | P0 公历与重复 | `BLOCKED` | P0 继承 TD-006/007；农历为后继能力且尚缺独立产品/技术决定。 |
+| [time-and-recurrence.md](time-and-recurrence.md) | `PRESENT` | 文档基线 | `VALID` | `NOT_REQUIRED` | 文档基线 | P0 公历与重复、P1 农历产品规则 | `PASS` | P0 继承 TD-006/007 与合同/oracle；农历继承 PD-018、TD-028 与独立转换合同/oracle。 |
 | [reminders-and-notifications.md](reminders-and-notifications.md) | `PRESENT` | 文档基线 | `VALID` | `NOT_REQUIRED` | 文档基线 | P0 本地提醒 | `PASS` | P0 继承 TD-004/006/007/009/010；P1 远程能力继承 OQ-006、TD-020/022/023。 |
 | [search-and-organization.md](search-and-organization.md) | `PRESENT` | 搜索基线 | `INVALID` | `NOT_REQUIRED` | 文档基线 | P0 本地搜索 | `BLOCKED` | P0 继承 TD-006/008；P1 服务端搜索继承 OQ-006、TD-020/023。 |
 | [data-lifecycle.md](data-lifecycle.md) | `PRESENT` | 文档基线 | `VALID` | `NOT_REQUIRED` | 文档基线 | P0 本地数据 | `PASS` | P0 继承 TD-004/005/006/009/010/011；P1 云生命周期继承 OQ-006、TD-018/020/021/023。 |
-| [account-and-sync.md](account-and-sync.md) | `PRESENT` | P1 实施基线 | `INVALID` | `NOT_REQUIRED` | 待确认 | P1 账号与同步 | `BLOCKED` | P1 继承 OQ-006、TD-015/018～023；OQ-001/002 只阻塞真实用户/生产，P0 只使用扩展缝。 |
+| [account-and-sync.md](account-and-sync.md) | `PRESENT` | 待确认 | `VALID` | `NOT_REQUIRED` | 待确认 | P1 账号与同步 | `BLOCKED` | 合法但非基线；P1 继承 OQ-006、TD-015/018～023，P0 只使用关闭的扩展缝。 |
 | [family-sharing.md](family-sharing.md) | `PRESENT` | P2 家庭首期实施基线 | `INVALID` | `NOT_REQUIRED` | 待确认 | P2 家庭首期 | `BLOCKED` | P2 继承 OQ-006 与 TD-019/020/022/023/024。 |
 | [ai-creation-contract.md](ai-creation-contract.md) | `PRESENT` | 智能能力基线 | `INVALID` | `NOT_REQUIRED` | 待确认 | P0 在线 AI | `BLOCKED` | TD-012～017；OQ-001/002 阻塞生产/公开真实数据，OQ-007 只阻塞商业化，OQ-010 使用非阻塞默认；OQ-108/109 待安全关闭证据。 |
 | [ai-evaluation.md](ai-evaluation.md) | `PRESENT` | 智能发布门槛 | `INVALID` | `NOT_REQUIRED` | 文档基线 | P0 AI 发布 | `BLOCKED` | TD-013/014/016/017；OQ-001/002 只阻塞生产与公开真实数据。 |
 
-#### 4.7.4 工程与安全缺件
+#### 4.7.4 工程与安全
 
-| 文件 | Exists | 当前状态 | Status check | Evidence | Planned initial → 目标 | Gate scope | 文档 Gate | 依赖、安全默认与后继门 |
+| 文件 | Exists | 当前状态 | Status check | Evidence | 目标合法状态 | Gate scope | 文档 Gate | 依赖、安全默认与后继门 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `system-architecture.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 文档基线 | P0 架构 | `BLOCKED` | 本地继承 TD-001～011，在线继承 TD-012～017；P1/P2 再继承 OQ-006、TD-018～027。 |
-| `persistence-schema.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 文档基线 | P0 持久层 | `BLOCKED` | P0 继承 TD-002～006/008/010/011；P1 服务端映射再继承 OQ-006、TD-018/020/023。 |
-| `service-contracts.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 待确认 | P0 在线 AI | `BLOCKED` | P0 内部适配继承 TD-012～016，OQ-010 使用非阻塞默认；OQ-001/002 阻塞生产/公开真实数据；P1 再继承 OQ-006、TD-019～023。 |
-| `security-and-privacy.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 文档基线 | P0 本地安全 | `BLOCKED` | P0 本地继承 TD-003～005/011，OQ-005 使用非阻塞默认并为 OQ-108/109 提供关闭证据；P0 公开再继承 OQ-001/002、TD-014/016；P1 再继承 OQ-006、TD-019/023，P2 再继承 TD-024/025。 |
-| `engineering-standards.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 文档基线 | P0 工程初始化 | `BLOCKED` | 客户端继承 OQ-003 默认与 TD-001/002/006/017；在线工程再继承 TD-015。 |
-| `analytics-and-telemetry.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 待确认 | 接入任何遥测 SDK | `BLOCKED` | TD-016；OQ-010 使用非阻塞默认，OQ-001/002 阻塞公开真实数据。 |
+| [system-architecture.md](system-architecture.md) | `PRESENT` | 文档基线 | `VALID` | `NOT_REQUIRED` | 文档基线 | 永久工程骨架架构 | `PASS` | 只激活无长期数据的客户端骨架；本地正式 adapter 继承 TD-001～011/合同门，在线/P1/P2 保持关闭。 |
+| `persistence-schema.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 文档基线 | P0 首个持久化切片 | `BLOCKED` | P0 继承 TD-002～006/008/010/011；P1 服务端映射再继承 OQ-006、TD-018/020/023。 |
+| `service-contracts.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 待确认 → 文档基线 | P0 在线 AI | `BLOCKED` | P0 继承 TD-012～016，OQ-010 使用非阻塞默认；OQ-001/002 阻塞生产/公开真实数据；P1 再继承 OQ-006、TD-019～023。 |
+| `security-and-privacy.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 文档基线 | P0 首个真实数据/在线安全 | `BLOCKED` | P0 本地继承 TD-003～005/011；在线再继承 TD-014/016 和第三方核验；P1/P2 继承 OQ-006 及对应 ADR。 |
+| [engineering-standards.md](engineering-standards.md) | `PRESENT` | 文档基线 | `VALID` | `NOT_REQUIRED` | 文档基线 | P0 客户端永久骨架 | `PASS` | 客户端继承 TD-001/002/006/007；服务端 runtime 等 TD-015，内部分发/OTA 等 TD-017。 |
+| `analytics-and-telemetry.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 待确认 → 文档基线 | 接入任何遥测 SDK | `BLOCKED` | 继承 TD-016；在此之前 scaffold 不注册 exporter，OQ-001/002 阻塞公开真实数据。 |
+| `third-party-services.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 待确认 → 文档基线 | 启用任何真实第三方 route | `BLOCKED` | 逐 route 核验地区、用途、训练/留存/删除、合同和子处理者；TD-013 明确依赖，合成 fake 不需要真实 route。 |
 
-#### 4.7.5 交付与运营缺件
+#### 4.7.5 交付与运营
 
-| 文件 | Exists | 当前状态 | Status check | Evidence | Planned initial → 目标 | Gate scope | 文档 Gate | 依赖、安全默认与后继门 |
+| 文件 | Exists | 当前状态 | Status check | Evidence | 目标合法状态 | Gate scope | 文档 Gate | 依赖、安全默认与后继门 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `acceptance-spec.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 文档基线 | P0 首个纵向切片 | `BLOCKED` | 每个场景继承其专项 OQ/ADR/合同门。 |
-| `implementation-plan.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 文档基线 | P0 开发规划 | `BLOCKED` | OQ-008 只阻塞日历日期，不阻塞依赖里程碑和无日期切片顺序。 |
-| `test-strategy.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 文档基线 | P0 首个纵向切片 | `BLOCKED` | 继承各 ADR、机器合同、oracle 和 implementation evidence 门。 |
-| `observability-and-operations.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 待确认 | P0 在线共享环境 | `BLOCKED` | TD-012～016；OQ-010 使用非阻塞默认，OQ-001/002 阻塞生产/公开真实数据。 |
-| `release-operations.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 待确认 | P0 首次内部分发 | `BLOCKED` | 内部分发继承 TD-017；OQ-008 只影响日期，OQ-001/002/009 只阻塞公开测试、商店提交或公开投放。 |
-| `legal-and-compliance.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 待确认 | P0 公开测试 | `BLOCKED` | OQ-001/002/009 与届时真实供应商、处理者和运营主体。 |
+| `acceptance-spec.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 文档基线 | P0 首个正式纵向切片 | `BLOCKED` | 永久骨架用 ARCH/ENG/IMP/TEST 结果验收；产品场景仍须由本文件补齐并继承专项门。 |
+| [implementation-plan.md](implementation-plan.md) | `PRESENT` | 文档基线 | `VALID` | `NOT_REQUIRED` | 文档基线 | 无日期实施顺序/M0 骨架 | `PASS` | OQ-008 只阻塞日历日期；M1～M7 分别继承其叙事、合同和发布门。 |
+| [test-strategy.md](test-strategy.md) | `PRESENT` | 文档基线 | `VALID` | `NOT_REQUIRED` | 文档基线 | M0 骨架与测试治理 | `PASS` | M0 不要求尚不存在的 implementation evidence；正式切片仍继承合同/oracle/验收门。 |
+| `observability-and-operations.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 待确认 → 文档基线 | P0 在线共享环境 | `BLOCKED` | TD-012～016；合成客户端骨架不接 collector，OQ-001/002 阻塞生产/公开真实数据。 |
+| `release-operations.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 待确认 → 文档基线 | P0 首次内部分发 | `BLOCKED` | 内部分发继承 TD-017；OQ-008 只影响日期，OQ-001/002/009 只阻塞对应公开/生产范围。 |
+| `legal-and-compliance.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 待确认 → 文档基线 | P0 公开测试 | `BLOCKED` | OQ-001/002/009 与届时真实供应商、处理者和运营主体；本地合成骨架不对外。 |
 | `support-playbook.md` | `MISSING` | `—` | `—` | `NOT_REQUIRED` | 草案 → 待确认 → 文档基线 | P0 公开测试 | `BLOCKED` | 部署版本继承 TD-017；主体/联系方式继承 OQ-002。 |
 
-快照汇总：`PRESENT=27`、`MISSING=13`；已存在文件中 `VALID=8`、`INVALID=19`。因此该锚点快照不得宣称 GOV-006 意义上的“全部开发文档就绪”。
+快照汇总：`PRESENT=31`、`MISSING=10`；已存在文件中 `VALID=18`、`INVALID=13`。17 个合法基线/持续维护文档的相应文档 Gate 为 `PASS`，合法但为“待确认”的账号/同步文档仍为 `BLOCKED`。本快照只确认“永久工程骨架”可以开始；P0 正式本地切片、在线、内部分发和公开发布仍分别被上表及第 4.8 节缺件阻塞，不能宣称“全部开发文档就绪”。
 
 ### 4.8 机器契约层
 
@@ -257,7 +259,7 @@ ADR 不使用上述中文状态，其 `Status` 只允许 `Proposed`、`Accepted`
 | [specs/ai/record-draft.schema.json](../specs/ai/record-draft.schema.json) | Draft 2020-12；`contractVersion="1.0"` | `Normative` | `PRESENT` | `ACTIVE` | `specs/api/openapi.yaml` | `specs/ai/fixtures/v1/manifest.json` | P0 AI adapter | `BLOCKED` |
 | [specs/backup/container-v1.md](../specs/backup/container-v1.md) | `containerFormatVersion=1`；`headerVersion=1`；`suiteId=1`；`passphraseProfileId=1`；`kdfProfileId=1` | `Normative` | `PRESENT` | `ACTIVE` | `specs/backup/manifest.schema.json`, `specs/persistence/portable-v1.sql`, `specs/persistence/sqlcipher-profiles-v1.md` | `specs/backup/fixtures/v1/manifest.json` | 首个可长期保留备份 | `BLOCKED` |
 | [specs/backup/manifest.schema.json](../specs/backup/manifest.schema.json) | Draft 2020-12；`manifestSchemaVersion=1` | `Normative` | `PRESENT` | `ACTIVE` | `specs/backup/container-v1.md`, `specs/persistence/portable-v1.sql` | `specs/backup/fixtures/v1/manifest.json` | 首个可长期保留备份 | `BLOCKED` |
-| `specs/api/openapi.yaml` | OpenAPI 3.1；API v1 | `—` | `MISSING` | `—` | `specs/ai/record-draft.schema.json` | `specs/api/fixtures/v1/manifest.json` | P0 在线 AI/任何生产服务 | `BLOCKED` |
+| `specs/api/openapi.yaml` | OpenAPI 3.1.2；API v1 | `—` | `MISSING` | `—` | `specs/ai/record-draft.schema.json` | `specs/api/fixtures/v1/manifest.json` | P0 在线 AI/任何生产服务 | `BLOCKED` |
 | `specs/telemetry/events.schema.json` | Draft 2020-12；telemetry schema v1 | `—` | `MISSING` | `—` | `NONE` | `specs/telemetry/fixtures/v1/manifest.json` | 接入任何遥测 SDK | `BLOCKED` |
 
 #### 4.8.2 治理基础设施 Registry
@@ -359,6 +361,7 @@ Schema/OpenAPI 是其机器字段的唯一权威；协议 Markdown 是 byte 与�
 | 页面如何表现 | 页面规格与内容设计 |
 | 数据怎样保存、状态怎样变化 | 领域模型及对应专项规则 |
 | 服务如何通信 | 服务契约与 OpenAPI |
+| 真实第三方 route 是否具备处理与启用资格 | 第三方服务登记 |
 | 系统怎样实现 | 技术架构和技术决策记录 |
 | 机器字段、byte layout 或 parser 怎样实现 | 对应 `specs/` 契约登记项 |
 | 怎样证明实现正确 | 测试策略和对应需求编号 |
@@ -411,6 +414,7 @@ Schema/OpenAPI 是其机器字段的唯一权威；协议 Markdown 是 byte 与�
 | `SEC-` | 安全与隐私控制 | `security-and-privacy.md` |
 | `ENG-` | 工程标准 | `engineering-standards.md` |
 | `TEL-` | 遥测事件与数据治理 | `analytics-and-telemetry.md` |
+| `TPS-` | 第三方服务 route、处理条件与启用资格 | `third-party-services.md` |
 | `ACPT-` | 可执行验收场景 | `acceptance-spec.md` |
 | `IMP-` | 实施里程碑与完成定义 | `implementation-plan.md` |
 | `TEST-` | 测试策略与质量门 | `test-strategy.md` |
@@ -525,7 +529,18 @@ ADR 按其固定结构声明元数据；JSON Schema、OpenAPI 等机器文件无
 - 术语、信息架构和核心用户流程已形成文档基线；
 - 核心流程中的异常与权限拒绝路径已经定义。
 
-### 10.2 可以开始 P0 本地功能开发
+### 10.2 可以开始永久工程骨架
+
+- TD-001/002 已 `Accepted`，ADR 索引与正文一致；
+- `system-architecture.md`、`engineering-standards.md`、`implementation-plan.md` 和 `test-strategy.md` 已形成合法“文档基线”；
+- 骨架 scope 只包含客户端 workspace、移动壳、层/模块边界、composition root、内存/noop/disabled port、纯确定性测试、CI 和合成 capability spike；
+- production composition root 不注册数据库、通知产品入口、网络、遥测、OTA、账号、同步、家庭或 Web adapter，不产生长期数据、公共 wire format 或真实外部流量；
+- OQ-003 已有接受决定，OQ-008 只阻塞日期；OQ-001/002/009 不阻塞本地合成工程；
+- 当前 registry snapshot 不是 `STALE`，且工作树对登记范围清洁。
+
+该 Gate 是开发前的决定/文档 readiness，不要求尚不存在的实现 evidence。代码产生后必须按工程规范和测试策略通过每个合入门；M0 完成仍不能自动打开下一节。
+
+### 10.3 可以开始 P0 本地功能开发
 
 - P0 页面规格、领域模型、业务规则、专项规范、系统架构、持久化 Schema、安全模型和工程规范已形成合法“文档基线”；
 - 当前本地切片所需 TD-001～011 已 `Accepted`，且 ADR 索引与正文一致；
@@ -533,19 +548,19 @@ ADR 按其固定结构声明元数据；JSON Schema、OpenAPI 等机器文件无
 - 每个开发项有验收条件并能追溯到规则编号；
 - 尚未确定事项均不阻塞当前里程碑，或已经记录默认处理方式。
 
-### 10.3 可以开始 P0 在线智能开发
+### 10.4 可以开始 P0 在线智能开发
 
 - TD-012～017 已 `Accepted`，`service-contracts.md`、OpenAPI、安全、遥测、可观测性和发布规范达到各自文档/Contract/Oracle Gate；
 - OQ-001/002 可在内部、无真实用户数据的隔离环境中暂不关闭，但生产 route、真实数据与公开测试仍被阻塞；
 - 模型/服务失败只关闭可选在线能力，P0 手动、离线、备份与本地提醒闭环继续可用。
 
-### 10.4 可以开始 P1/P2 实现
+### 10.5 可以开始 P1/P2 实现
 
 - P1 在 OQ-006 关闭、TD-018～023 `Accepted`、同步/OpenAPI/attachment/cloud-backup/remote-push 合同和三方 oracle 就绪前不得冻结架构；
 - P2 在 P1 门通过、TD-024～027 `Accepted`，家庭授权/审计、Web、成熟 AI 和公共模板专项验收就绪前不得启用；
 - 未来农历能力在独立产品与技术决定、数据来源/版本/迁移和 oracle 就绪前保持关闭。
 
-### 10.5 可以开始公开测试
+### 10.6 可以开始公开测试
 
 - 端到端、平台兼容、离线、备份恢复和安全测试达到门槛；
 - 所有生产格式/API 的历史 oracle、consumer/provider 或双平台 conformance 已通过，`evidence/conformance/index.json` 对当前 Git/合同/oracle digest 为 `VERIFIED`，且没有把 ADR/契约状态误当作测试证据；
@@ -553,7 +568,7 @@ ADR 按其固定结构声明元数据；JSON Schema、OpenAPI 等机器文件无
 - 隐私政策、权限说明和第三方数据处理清单与实现一致；
 - 数据格式和迁移路径经过真实升级验证。
 
-### 10.6 GOV-062：Gate 计算规则
+### 10.7 GOV-062：Gate 计算规则
 
 Gate 按 scope 分别计算，不能套用一条会令开发前置条件依赖尚不存在实现的循环公式：
 
@@ -563,7 +578,7 @@ Gate 按 scope 分别计算，不能套用一条会令开发前置条件依赖�
 4. Implementation Gate：`evidence/conformance/index.json` 对当前 Git SHA、合同 digest、oracle digest 和所有必需实现/平台均为 `VERIFIED`。
 5. Release Gate：上述适用 Gate 全部通过，`evidence/release/index.json` 绑定同一候选版本并满足安全、法律、运营、灰度和回滚证据。
 
-任一 Gate 还要求 registry 快照不是 `STALE` 且全仓库审计通过。单个子系统可以先通过自己的切片门，不要求 P1/P2 文件阻塞 P0 本地切片；但不得用子集 `PASS` 声称整体或生产就绪。根据第 4.7/4.8 节锚点快照，P0 本地开发门为 `BLOCKED`。
+任一 Gate 还要求 registry 快照不是 `STALE` 且全仓库审计通过。单个子系统可以先通过自己的切片门，不要求 P1/P2 文件阻塞 P0 本地切片；但不得用子集 `PASS` 声称整体或生产就绪。根据第 4.7/4.8 节锚点快照，永久工程骨架 Gate 为 `PASS`；P0 正式本地功能、P0 在线、P1/P2、内部分发和公开测试 Gate 均仍为 `BLOCKED`。
 
 ## 11. 文档提交规则
 
@@ -578,6 +593,7 @@ Gate 按 scope 分别计算，不能套用一条会令开发前置条件依赖�
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.3 | 2026-07-27 | 重审 41 项文档 registry，登记架构/工程/实施/测试基线及第三方服务 owner，分配 `GOV-REGISTRY-2026-07-27-02`，新增不产生长期数据的永久工程骨架 Gate。 |
 | v1.2.1 | 2026-07-27 | 跨日后重新执行完整 registry 审计，分配 `GOV-REGISTRY-2026-07-27-01`，不复用前一快照 ID。 |
 | v1.2 | 2026-07-27 | 新增 GOV 不变量、40 项文档事实 registry、不可复用 snapshot trailer、产品合同/oracle/治理基础设施/evidence 分层 registry、Authority change train、分阶段 Gate 计算和一文件一提交强制规则。 |
 | v1.1 | 2026-07-26 | 增加 ADR、契约与发布分层门禁、规范性协议 Markdown、机器契约登记与变更流程、备份合同权威边界，收口账号/同步/家庭 ownership，并补全稳定编号 owner。 |
