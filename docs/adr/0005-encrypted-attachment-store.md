@@ -5,7 +5,7 @@
 > Decision owners：客户端数据负责人、安全负责人  
 > Scope：P0～P2 移动端附件字节、缩略图、临时文件、完整性和清理  
 > Related requirements：PR-105、PR-500、领域模型 §7.3、BR-023～024、DATA-012、DATA-020～022、DATA-082、DATA-122、QR-012、QR-020、QR-070、QR-100～101  
-> Related ADRs：[TD-003](0003-encrypted-local-database.md)、[TD-004](0004-device-key-hierarchy-and-app-lock.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、[TD-011](0011-backup-container-and-cryptography.md)、[TD-021](0021-cloud-attachment-and-backup-transfer.md)
+> Related ADRs：[TD-003](0003-encrypted-local-database.md)、[TD-004](0004-device-key-hierarchy-and-app-lock.md)、[TD-010](0010-sqlite-snapshot-migration-and-atomic-restore.md)、[TD-011](0011-backup-container-and-cryptography.md)、TD-021
 > Decision gate：原生密码库、安全评审、恶意文件、崩溃/空间不足和 50 MB 流式真机测试通过后才能开放附件
 
 ## Context
@@ -294,6 +294,7 @@ restore/migration candidate 产生的新密文即使尚未绑定 active DB，也
 
 | 日期 | 说明 |
 | --- | --- |
+| 2026-07-27 | 将尚未建立的 TD-021 改为纯编号引用，保留云附件与云备份传输的计划关系但不创建破链。 |
 | 2026-07-26 | 增加 CiphertextIdentity、共享 object store 语义与重新求根的条件 GC；冻结 snapshot lease 和 Dataset Controller/File Store 所有权。 |
 | 2026-07-26 | 对齐 TD-010/011：区分 active 动态 root 与 sealed generation manifest，补齐全部 GC lease，并冻结 portable 原附件重加密与缩略图重建规则。 |
 | 2026-07-26 | 接受 per-file key、secretstream 256 KiB 分块、加密暂存/原子提升、独立缩略图和可恢复 GC。 |
