@@ -1,6 +1,6 @@
 # 生活有谱测试策略
 
-> 项目代号：`life-book` · 版本：v1.0 · 更新日期：2026-07-27 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.1 · 更新日期：2026-07-27 · 状态：文档基线
 >
 > 权威范围：测试分层、适用矩阵、质量门、测试数据、故障注入、缺陷等级、波动治理及测试/evidence 的判定边界
 >
@@ -109,11 +109,11 @@ architecture suite 必须包含故意违规的最小 fixture 或 checker 自测�
 
 ## 5. TD-001 capability spike
 
-capability spike 用于发现技术栈反证，不激活生产合同。它必须使用独立入口、合成数据、release configuration 和锁定工具链；失败会暂停相应切片并触发替代方案评估。
+capability spike 用于发现技术栈反证，不激活生产合同。它必须使用不进入普通产品 artifact 的独立 build variant/target 或 spike App、合成数据、release configuration 和锁定工具链；只隐藏运行时按钮不构成隔离。失败会暂停相应切片并触发替代方案评估。
 
 | 能力 | iOS/Android 最低证据 | 不构成的证明 |
 | --- | --- | --- |
-| Development Build/CNG | 干净生成、Development Build、本地 release build；无 Expo 在线服务仍能构建/运行本地壳。 | TD-017 分发/OTA 可发布。 |
+| Development Build/CNG | 干净生成、Development Build、本地 release build；M0 在无 Expo 在线服务时仍能构建并运行静态本地壳。 | TD-017 分发/OTA 可发布，或完整本地手动产品已离线验收。 |
 | SQLCipher | 合成库创建、事务、candidate migration、关闭重开、错误 key；不保留格式。 | 正式 Schema、bootstrap 或用户数据可写。 |
 | 加密文件 | 合成 50 MB 文件分块读/写、认证、取消、异常清理；无明文残留。 | 正式附件/备份格式。 |
 | 通知 | 合成 category/request 的调度、取消、点击、动作；Android 区分 exact/approximate capability。 | 产品通知合同、准时展示或用户已读。 |
@@ -123,13 +123,15 @@ capability spike 用于发现技术栈反证，不激活生产合同。它必须
 | 无障碍 | VoiceOver/TalkBack、最大字体、Reduce Motion、最小命中区的组件样例。 | 全部页面验收。 |
 | 诊断 | 崩溃符号、受控日志与 source map 使用无内容样例。 | 允许接入生产遥测或第三方 collector。 |
 
-第 1～6 项任何关键能力不能在 iOS 16 和 Android 10 的适用设备/模拟环境以可维护方式完成，都不能用 mock 接受 TD-001。spike 报告至少记录 Git SHA、设备/OS、release/debug、精确依赖、步骤、结果、已知限制和删除/保留决定；它属于技术可行性证据，不写入 `evidence/conformance/index.json` 冒充正式合同符合性。
+第 1～6 项任何关键能力不能在 iOS 16 最低档设备/模拟器和 Android 10 真机或等价设备以可维护方式完成，都不能用 mock 接受 TD-001。spike 报告至少记录 Git SHA、设备/OS、release/debug、精确依赖、步骤、结果、已知限制和删除/保留决定；它属于技术可行性证据，不写入 `evidence/conformance/index.json` 冒充正式合同符合性。
+
+TD-001 第 9 项分两段留证：M0 只证明不连接 Expo 在线服务时本地构建和静态壳可运行；M5/P0 本地手动候选再证明完整本地产品在该条件下可运行。前一结果不得命名为“第 9 项全部通过”，后一结果也不能反向替代 M0 对构建独立性的证据。
 
 ## 6. 领域与应用测试
 
 ### 6.1 决定表与边界
 
-每个稳定 `BR-*`、`TIME-*`、`REM-*`、`SEARCH-*` 规则至少覆盖：
+每个稳定 `BR-*`、`REC-*`、`REM-*`、`SRCH-*` 规则至少覆盖：
 
 - 一个最小合法例和适用的最大/边界例；
 - 每种显式拒绝原因；
@@ -310,4 +312,5 @@ Repository contract suite 同时运行内存与 SQLCipher adapter；SQL 结果�
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.1 | 2026-07-27 | 固定 spike 独立构建隔离和 Android 10 真机边界，将 TD-001 第 9 项拆为 M0 构建证据与 M5 完整本地产品证据，并修正规则前缀。 |
 | v1.0 | 2026-07-27 | 建立测试分层、evidence 边界、永久骨架与 TD-001 spike 门，以及后续领域、合同、持久化、平台、在线和发布测试矩阵。 |
