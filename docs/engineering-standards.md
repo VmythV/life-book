@@ -1,6 +1,6 @@
 # 生活有谱工程规范
 
-> 项目代号：`life-book` · 版本：v1.0 · 更新日期：2026-07-27 · 状态：文档基线
+> 项目代号：`life-book` · 版本：v1.1 · 更新日期：2026-07-27 · 状态：文档基线
 >
 > 权威范围：物理代码组织、命名与 import 约束、TypeScript 规则、依赖和工具链锁定、配置与秘密、生成物、开发命令、CI 最低合入门、Git/评审及原生代码约束
 >
@@ -18,7 +18,7 @@
 | --- | --- |
 | ENG-001 | 仓库使用一个 JavaScript workspace、一个包管理器和一个 lockfile；本地与 CI 从同一锁定输入安装。 |
 | ENG-002 | 代码依赖遵循 Presentation → Application → Domain ← Ports ← Adapters；规则由静态检查执行，不靠评审记忆。 |
-| ENG-003 | 跨模块只允许导入公开入口，禁止 deep import、循环依赖、跨模块私有目录和 adapter 互调。 |
+| ENG-003 | 模块代码跨模块只允许导入公开入口，禁止 deep import、循环依赖、跨模块私有目录和 adapter 互调；唯一特权装配入口按第 2.2 节受控。 |
 | ENG-004 | 所有 TypeScript 产品代码使用严格配置；边界运行时校验不能用静态类型、cast 或 non-null assertion 替代。 |
 | ENG-005 | 时间、ID、随机、locale、time zone、平台状态与配置显式注入；测试不得篡改隐式全局状态。 |
 | ENG-006 | 可预期失败使用封闭结果类型；原生、SQLite、HTTP 或 SDK 异常必须在 adapter 边界转换。 |
@@ -42,8 +42,8 @@ apps/
   mobile/
     app.config.ts
     src/
+      composition/
       shell/
-        composition/
         navigation/
         presentation/
       modules/
@@ -69,7 +69,7 @@ tools/
 
 布局规则：
 
-- `apps/mobile` 是 Expo Development Build/CNG App；`shell/composition` 是创建具体 adapter 的唯一生产位置。
+- `apps/mobile` 是 Expo Development Build/CNG App；`src/composition` 是由逻辑 `shell` 拥有、但物理上位于所有模块之外的唯一特权装配入口。
 - `modules/` 的合法模块名来自 [系统架构](system-architecture.md)；只创建当前切片需要的目录，不建立空的 P1/P2 入口。
 - `domain` 和 `application` 必须可在无 React Native 的 Node 测试进程运行；`presentation` 与 `adapters` 是外层。
 - `platform` 只放跨模块平台 adapter 和 CNG 接线，不放业务规则。
@@ -86,9 +86,11 @@ tools/
 ### 2.2 包与模块公开面
 
 - workspace 包名统一使用 `@life-book/<name>`；内部包不得发布到公共 registry。
-- 每个模块的唯一跨模块入口是 `public.ts`；它只导出明确的 facade、command/query/result、只读 DTO 或领域结果。
+- 每个模块对其他模块的唯一入口是 `public.ts`；它只导出明确的 facade、command/query/result、只读 DTO 或领域结果。
 - 同模块内部使用显式相对路径；跨 workspace 使用 package `exports`。禁止全局 `@/` alias 隐藏依赖层级。
 - `public.ts` 不导出 ORM row、文件路径、SDK 对象、可变聚合或 adapter constructor。
+- `apps/mobile/src/composition/**` 是唯一例外：它可以直接导入各模块 `adapters/**` 的 constructor/factory 和所实现的 port 类型以完成静态绑定，但不得导入私有领域实体、执行用例或承载业务分支。任何模块、页面、adapter 或测试 production graph 都不得反向导入 `composition`，且该目录不能被 workspace package 导出。
+- architecture test 必须把上述装配边列入单独 allowlist：只有 `composition → module adapter/platform adapter/public facade` 合法；其他跨模块 deep import 仍失败。装配入口本身不是第二业务模块，也不允许 adapter 互相解析。
 - 跨模块业务事务由上层 application use case 编排；不得通过一个巨大 `common`/`shared-service` 包规避所有权。
 - 任何新跨模块边都必须进入依赖图和 architecture test；发现环时重新划分职责，不能用动态 import 掩盖。
 
@@ -316,7 +318,7 @@ CI 调用第 10 节根 script，不复制内部参数。required check 失败不
 - 关键路径必须在 New Architecture、Hermes 和 release configuration 验证；debug/模拟器结果不能替代 TD-001 的真机 spike。
 - 符号、source map、R8/ProGuard、隐私清单、license 与 SBOM 影响必须登记；不含生活内容的诊断样例才可离开设备。
 
-capability spike 可以包含独立 native 源，但必须与普通 App route/production composition root 隔离，并能整体删除而不破坏产品构建。
+capability spike 可以包含独立 native 源，但必须使用不进入普通产品 artifact 的独立 build variant/target 或独立 spike App 入口，与普通 App route/production composition root 形成可静态验证的依赖隔离，并能整体删除而不破坏产品构建。仅用运行时隐藏按钮不足以构成隔离。
 
 ## 14. 例外和禁止项
 
@@ -353,4 +355,5 @@ capability spike 可以包含独立 native 源，但必须与普通 App route/pr
 
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
+| v1.1 | 2026-07-27 | 将 composition root 放到 app-level 特权装配目录，定义唯一 adapter deep-import allowlist，并要求 capability spike 使用独立构建入口。 |
 | v1.0 | 2026-07-27 | 建立 P0 客户端永久骨架的仓库、TypeScript、依赖、配置、生成、命令、CI、评审和原生规范；明确服务端与发布工具链后置。 |
