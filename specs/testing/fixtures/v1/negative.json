@@ -1,0 +1,187 @@
+{
+  "fixtureVersion": 1,
+  "kind": "negative",
+  "schema": "oracle_manifest",
+  "baseManifest": {
+    "oracleManifestVersion": 1,
+    "oracleId": "example_oracle",
+    "oracleVersion": "1.0.0",
+    "contracts": [
+      {
+        "path": "specs/example/contract-v1.json",
+        "identity": {
+          "name": "exampleContractVersion",
+          "value": 1
+        },
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "generator": {
+      "name": "independent-example",
+      "version": "1.0.0",
+      "implementationPath": "tools/oracles/example.mjs",
+      "independence": "Independent example implementation used only by the schema oracle."
+    },
+    "selfCheck": {
+      "command": "corepack pnpm oracle:example",
+      "expectedExitCode": 0
+    },
+    "fixtures": [
+      {
+        "path": "golden.json",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "kind": "golden",
+        "expectation": {
+          "mode": "all_accept",
+          "caseCount": 1
+        }
+      },
+      {
+        "path": "boundary.json",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "kind": "boundary",
+        "expectation": {
+          "mode": "case_defined",
+          "caseCount": 1
+        }
+      },
+      {
+        "path": "negative.json",
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "kind": "negative",
+        "expectation": {
+          "mode": "all_reject",
+          "caseCount": 1
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "wrong_manifest_version",
+      "mutation": {
+        "operation": "set",
+        "path": ["oracleManifestVersion"],
+        "value": 2
+      },
+      "expectedValid": false,
+      "expectedKeyword": "const"
+    },
+    {
+      "id": "missing_contract_checksum",
+      "mutation": {
+        "operation": "delete",
+        "path": ["contracts", 0, "sha256"]
+      },
+      "expectedValid": false,
+      "expectedKeyword": "required"
+    },
+    {
+      "id": "unknown_root_property",
+      "mutation": {
+        "operation": "set",
+        "path": ["unexpected"],
+        "value": true
+      },
+      "expectedValid": false,
+      "expectedKeyword": "additionalProperties"
+    },
+    {
+      "id": "absolute_contract_path",
+      "mutation": {
+        "operation": "set",
+        "path": ["contracts", 0, "path"],
+        "value": "/tmp/contract.json"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "pattern"
+    },
+    {
+      "id": "fixture_path_traversal",
+      "mutation": {
+        "operation": "set",
+        "path": ["fixtures", 0, "path"],
+        "value": "../golden.json"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "pattern"
+    },
+    {
+      "id": "uppercase_checksum",
+      "mutation": {
+        "operation": "set",
+        "path": ["fixtures", 0, "sha256"],
+        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "pattern"
+    },
+    {
+      "id": "missing_boundary_fixture",
+      "mutation": {
+        "operation": "set",
+        "path": ["fixtures", 1, "kind"],
+        "value": "golden"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "contains"
+    },
+    {
+      "id": "nonzero_expected_exit",
+      "mutation": {
+        "operation": "set",
+        "path": ["selfCheck", "expectedExitCode"],
+        "value": 1
+      },
+      "expectedValid": false,
+      "expectedKeyword": "const"
+    },
+    {
+      "id": "shell_metacharacter_in_command",
+      "mutation": {
+        "operation": "set",
+        "path": ["selfCheck", "command"],
+        "value": "corepack pnpm oracle:example && whoami"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "pattern"
+    },
+    {
+      "id": "duplicate_fixture_path",
+      "mutation": {
+        "operation": "set",
+        "path": ["fixtures", 1, "path"],
+        "value": "golden.json"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "duplicate_fixture_path"
+    },
+    {
+      "id": "empty_contract_set",
+      "mutation": {
+        "operation": "set",
+        "path": ["contracts"],
+        "value": []
+      },
+      "expectedValid": false,
+      "expectedKeyword": "minItems"
+    },
+    {
+      "id": "duplicate_contract_path",
+      "mutation": {
+        "operation": "set",
+        "path": ["contracts", 1],
+        "value": {
+          "path": "specs/example/contract-v1.json",
+          "identity": {
+            "name": "otherContractVersion",
+            "value": 1
+          },
+          "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+        }
+      },
+      "expectedValid": false,
+      "expectedKeyword": "duplicate_contract_path"
+    }
+  ]
+}
