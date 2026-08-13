@@ -1,0 +1,9 @@
+{
+  "extends": ["expo/tsconfig.base", "../../tsconfig.base.json"],
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2022"],
+    "types": ["node", "react", "react-native", "vitest/globals"]
+  },
+  "include": ["app.config.ts", "index.ts", "src/**/*.ts", "src/**/*.tsx"]
+}
