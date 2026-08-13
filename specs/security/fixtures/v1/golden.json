@@ -1,0 +1,211 @@
+{
+  "fixtureVersion": 1,
+  "securityContractVersion": 1,
+  "kind": "golden",
+  "vectors": {
+    "presence": {
+      "formatVersion": 1,
+      "presenceSequence": "0",
+      "installationAnchorKeyId": "AAECAwQFBgcICQoLDA0ODw",
+      "installationId": "00000000-0000-4000-8000-000000000001",
+      "installationIncarnationId": "00000000-0000-4000-8000-000000000002",
+      "incarnationBootstrapOperationId": "00000000-0000-4000-8000-000000000003",
+      "presenceNonce": "LC0uLzAxMjM0NTY3ODk6Ozw9Pj9AQUJDREVGR0hJSks",
+      "applicationId": "dev.lifebook.mobile",
+      "createdAt": "2026-08-13T08:00:00.000Z"
+    },
+    "bootstrapInitializing": {
+      "formatVersion": 1,
+      "bootstrapSequence": "0",
+      "installationIncarnationId": "00000000-0000-4000-8000-000000000002",
+      "installationId": "00000000-0000-4000-8000-000000000001",
+      "incarnationBootstrapOperationId": "00000000-0000-4000-8000-000000000003",
+      "stateOperationId": "00000000-0000-4000-8000-000000000003",
+      "activeOperationId": null,
+      "notificationDatasetEpoch": "0",
+      "phase": "initializing",
+      "installPresenceRecordDigest": "00670c1e73e8696900d9178e2ba954036a8b621910c70615c154ad2178d22d34",
+      "candidateGenerationId": null,
+      "initializedGenerationId": null,
+      "initializedControlSequence": null,
+      "activationOpenReceiptDigest": null,
+      "appBuildId": "android-0.0.0-1",
+      "createdAt": "2026-08-13T08:00:00.000Z"
+    },
+    "bootstrapInitialized": {
+      "formatVersion": 1,
+      "bootstrapSequence": "2",
+      "installationIncarnationId": "00000000-0000-4000-8000-000000000002",
+      "installationId": "00000000-0000-4000-8000-000000000001",
+      "incarnationBootstrapOperationId": "00000000-0000-4000-8000-000000000003",
+      "stateOperationId": null,
+      "activeOperationId": "00000000-0000-4000-8000-000000000004",
+      "notificationDatasetEpoch": "0",
+      "phase": "initialized",
+      "installPresenceRecordDigest": "00670c1e73e8696900d9178e2ba954036a8b621910c70615c154ad2178d22d34",
+      "candidateGenerationId": null,
+      "initializedGenerationId": "00000000-0000-4000-8000-000000000005",
+      "initializedControlSequence": "1",
+      "activationOpenReceiptDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "appBuildId": "android-0.0.0-1",
+      "createdAt": "2026-08-13T08:00:00.000Z"
+    },
+    "bootstrapClearing": {
+      "formatVersion": 1,
+      "bootstrapSequence": "3",
+      "installationIncarnationId": "00000000-0000-4000-8000-000000000002",
+      "installationId": "00000000-0000-4000-8000-000000000001",
+      "incarnationBootstrapOperationId": "00000000-0000-4000-8000-000000000003",
+      "stateOperationId": "00000000-0000-4000-8000-000000000007",
+      "activeOperationId": "00000000-0000-4000-8000-000000000004",
+      "notificationDatasetEpoch": "0",
+      "phase": "clearing",
+      "installPresenceRecordDigest": "00670c1e73e8696900d9178e2ba954036a8b621910c70615c154ad2178d22d34",
+      "candidateGenerationId": null,
+      "initializedGenerationId": "00000000-0000-4000-8000-000000000005",
+      "initializedControlSequence": "1",
+      "activationOpenReceiptDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "appBuildId": "android-0.0.0-1",
+      "createdAt": "2026-08-13T08:00:00.000Z"
+    },
+    "anchorOuter": {
+      "ciphertext": "75QUfq4r3NH7DQV-93rYlslweKqZ0d-rP_5hQ-isXUXNKJSRuU4CUaqh464Dc1xgzLqeI1HOq1zFWPsGVTH5iFqXDWC8kwHx1ifYGCP3AbAb0NYsqgcvaaQxLtQccrumt5j2CmsjHAs8vN_bneIA_x2LAR0oSanbcqEFXrnXbWik9FlwSEZDfK18rpZNR7eYhBJJ8SYxVCWpkHJihUEKNk6-NB9HLTymQOJt32DvN7pjlq581lyKnG5gp0Cnb-nU6atIV3Z0QOMghwbCkKRYxxZZocI2PhtZvkdeemrkNFupsOj1NXP7udYXqEjHWmItgfyUyOkAX7O6FarqgA71TpTmZeCZkRFSbAQQutFwotT9MEucIznVEVVeUOee6_6iM_E_QvvBCUFjVcfBJjCvGMcaDZv0-vh8zs7-2Hp_dOzgutpuMJmTqZd2bLJd2-H6uEfsGVyAbO9ffaqReEv_G0n663ryhlIrZgPrQaH_OCWcZG5Ws4Wp_4bs22PNKf-DxVXA16BYDodFXmkuTDdL3v5ikgzQwcefV_ru7YLFy1re_6BrjSrIEObZb5w",
+      "envelopeFormatVersion": 1,
+      "installationAnchorKeyId": "AAECAwQFBgcICQoLDA0ODw",
+      "nonce": "EBESExQVFhcYGRob",
+      "recordKind": "install_presence",
+      "slotId": "a",
+      "tag": "5pUYLKKGN-idkfVmnyw61A"
+    },
+    "deviceEnvelope": {
+      "ciphertext": "8ctDwgb-M6oWst6cAGVKuOSOqVKYp4tO-Xx4FeneXTo",
+      "createdAt": "2026-08-13T08:00:00.000Z",
+      "deviceWrappingKeyId": "fH1-f4CBgoOEhYaHiImKiw",
+      "envelopeFormatVersion": 1,
+      "envelopeSequence": "0",
+      "installationId": "00000000-0000-4000-8000-000000000001",
+      "installationIncarnationId": "00000000-0000-4000-8000-000000000002",
+      "keyId": "bG1ub3BxcnN0dXZ3eHl6ew",
+      "keyPurpose": "database_data_key",
+      "nonce": "jI2Oj5CRkpOUlZaX",
+      "recordKind": "device_key",
+      "slotId": "a",
+      "tag": "fzpl2FS5E3wF7kNQQ1dZhA",
+      "wrappingAlgorithm": "aes_256_gcm_v1"
+    }
+  },
+  "cases": [
+    {
+      "id": "security.presence_schema_and_jcs",
+      "operation": "validate_presence",
+      "vector": "presence",
+      "expected": "valid"
+    },
+    {
+      "id": "security.presence_digest",
+      "operation": "presence_digest",
+      "vector": "presence",
+      "expected": "00670c1e73e8696900d9178e2ba954036a8b621910c70615c154ad2178d22d34"
+    },
+    {
+      "id": "security.bootstrap_initializing_schema_and_jcs",
+      "operation": "validate_bootstrap",
+      "vector": "bootstrapInitializing",
+      "expected": "valid"
+    },
+    {
+      "id": "security.bootstrap_digest",
+      "operation": "bootstrap_digest",
+      "vector": "bootstrapInitializing",
+      "expected": "64a2b4a8231b722119a771acc75d3d817efbcc10c8b3df61d7fbd73b44d2c9be"
+    },
+    {
+      "id": "security.anchor_aad_bytes",
+      "operation": "anchor_aad",
+      "input": {
+        "applicationId": "dev.lifebook.mobile",
+        "envelopeFormatVersion": 1,
+        "installationAnchorKeyId": "AAECAwQFBgcICQoLDA0ODw",
+        "recordKind": "install_presence",
+        "slotId": "a"
+      },
+      "expectedHex": "6c6966652d626f6f6b2f696e7374616c6c6174696f6e2d616e63686f722f616561642f7631007b226170706c69636174696f6e4964223a226465762e6c696665626f6f6b2e6d6f62696c65222c22656e76656c6f7065466f726d617456657273696f6e223a312c22696e7374616c6c6174696f6e416e63686f724b65794964223a2241414543417751464267634943516f4c4441304f4477222c227265636f72644b696e64223a22696e7374616c6c5f70726573656e6365222c22736c6f744964223a2261227d"
+    },
+    {
+      "id": "security.anchor_aes_gcm_kat",
+      "operation": "decrypt_anchor",
+      "vector": "anchorOuter",
+      "context": {
+        "applicationId": "dev.lifebook.mobile",
+        "physicalRecordKind": "install_presence",
+        "physicalSlotId": "a",
+        "keyHex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "expectedVector": "presence"
+    },
+    {
+      "id": "security.presence_bootstrap_compatible_pair",
+      "operation": "compatible_pair",
+      "inputVectors": ["presence", "bootstrapInitializing"],
+      "expected": true
+    },
+    {
+      "id": "security.device_envelope_schema",
+      "operation": "validate_device_envelope",
+      "vector": "deviceEnvelope",
+      "expected": "valid"
+    },
+    {
+      "id": "security.device_envelope_aad_bytes",
+      "operation": "device_aad",
+      "vector": "deviceEnvelope",
+      "expectedHex": "6c6966652d626f6f6b2f6465766963652d6b65792d656e76656c6f70652f616561642f7631007b226465766963655772617070696e674b65794964223a226648312d66344342676f4f456859614869496d4b6977222c22656e76656c6f7065466f726d617456657273696f6e223a312c22656e76656c6f706553657175656e6365223a2230222c22696e7374616c6c6174696f6e4964223a2230303030303030302d303030302d343030302d383030302d303030303030303030303031222c22696e7374616c6c6174696f6e496e6361726e6174696f6e4964223a2230303030303030302d303030302d343030302d383030302d303030303030303030303032222c226b65794964223a226247317562334278636e4e3064585a3365486c366577222c226b6579507572706f7365223a2264617461626173655f646174615f6b6579222c227265636f72644b696e64223a226465766963655f6b6579222c22736c6f744964223a2261222c227772617070696e67416c676f726974686d223a226165735f3235365f67636d5f7631227d"
+    },
+    {
+      "id": "security.device_envelope_aes_gcm_kat",
+      "operation": "decrypt_device_envelope",
+      "vector": "deviceEnvelope",
+      "context": {
+        "expectedInstallationId": "00000000-0000-4000-8000-000000000001",
+        "expectedInstallationIncarnationId": "00000000-0000-4000-8000-000000000002",
+        "expectedKeyPurpose": "database_data_key",
+        "expectedSlotId": "a",
+        "keyHex": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7"
+      },
+      "expectedPlaintextHex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+    },
+    {
+      "id": "security.strict_all_absent_is_fresh",
+      "operation": "classify",
+      "input": {
+        "strictAllAbsent": true,
+        "orphanAliases": false,
+        "keyAvailable": true
+      },
+      "expected": "fresh_eligible"
+    },
+    {
+      "id": "security.complete_three_key_set",
+      "operation": "key_set",
+      "input": {
+        "expectedInstallationId": "00000000-0000-4000-8000-000000000001",
+        "expectedInstallationIncarnationId": "00000000-0000-4000-8000-000000000002",
+        "envelopes": [
+          {
+            "keyPurpose": "database_data_key",
+            "keyId": "bG1ub3BxcnN0dXZ3eHl6ew"
+          },
+          {
+            "keyPurpose": "attachment_root_key",
+            "keyId": "rK2ur7CxsrO0tba3uLm6uw"
+          },
+          {
+            "keyPurpose": "dataset_control_key",
+            "keyId": "vL2-v8DBwsPExcbHyMnKyw"
+          }
+        ]
+      },
+      "expected": "ready"
+    }
+  ]
+}
