@@ -1,0 +1,54 @@
+{
+  "oracleManifestVersion": 1,
+  "oracleId": "scalar_encoding_v1",
+  "oracleVersion": "1.0.0",
+  "contracts": [
+    {
+      "path": "specs/scalars/v1.md",
+      "identity": {
+        "name": "scalarEncodingVersion",
+        "value": 1
+      },
+      "sha256": "c405ced41044de54c9edd4e068455d467dda5ea595bbcb28329294ffece95ec1"
+    }
+  ],
+  "generator": {
+    "name": "independent-node-scalar-oracle",
+    "version": "1.0.0",
+    "implementationPath": "tools/oracles/check-scalars-v1.mjs",
+    "independence": "The checker uses separately encoded proleptic Gregorian and exact-integer algorithms and never imports the product scalar package."
+  },
+  "selfCheck": {
+    "command": "corepack pnpm oracle:scalars:check",
+    "expectedExitCode": 0
+  },
+  "fixtures": [
+    {
+      "path": "golden.json",
+      "sha256": "14fccd69cf77528971c0e8c427be50310d08d6736a0c3b9a73562a392466282c",
+      "kind": "golden",
+      "expectation": {
+        "mode": "all_accept",
+        "caseCount": 28
+      }
+    },
+    {
+      "path": "boundary.json",
+      "sha256": "6685f28fa78b4beefa1df440c429b1b0286d681b2bee10f29f4e248f2cee4836",
+      "kind": "boundary",
+      "expectation": {
+        "mode": "case_defined",
+        "caseCount": 32
+      }
+    },
+    {
+      "path": "negative.json",
+      "sha256": "fed09bc80cd049b6dfa5a28fcc26b5b07cfe4b1a6ea88ce31bc7b976b609488b",
+      "kind": "negative",
+      "expectation": {
+        "mode": "all_reject",
+        "caseCount": 58
+      }
+    }
+  ]
+}
