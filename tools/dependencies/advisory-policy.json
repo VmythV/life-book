@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "exceptions": [
+    {
+      "advisoryId": "GHSA-w3rx-r6r6-pgpr",
+      "package": "image-size",
+      "exactVersion": "1.2.1",
+      "requiredPathSegment": ">metro>",
+      "owner": "client-platform",
+      "trackingItem": "DEP-001",
+      "reason": "The affected parser is reachable only from the Metro build toolchain in M0. Repository assets are synthetic and reviewed; user attachments are not active.",
+      "exitCondition": "Remove this exception as soon as image-size 2.0.3 or an upstream Metro release with an equivalent fix is installable."
+    },
+    {
+      "advisoryId": "GHSA-5p2g-fcmc-qvqq",
+      "package": "image-size",
+      "exactVersion": "1.2.1",
+      "requiredPathSegment": ">metro>",
+      "owner": "client-platform",
+      "trackingItem": "DEP-001",
+      "reason": "The affected parser is reachable only from the Metro build toolchain in M0. Repository assets are synthetic and reviewed; user attachments are not active.",
+      "exitCondition": "Remove this exception as soon as image-size 2.0.3 or an upstream Metro release with an equivalent fix is installable."
+    }
+  ]
+}
