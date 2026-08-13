@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://life-book.example/specs/testing/oracle-manifest-v1.schema.json",
+  "$comment": "Status: Draft; Authority: CANDIDATE; stable identity: oracleManifestVersion=1. Activation requires its independent fixture oracle and the documentation registry audit.",
+  "title": "Life Book contract oracle manifest v1",
+  "description": "A content-addressed index for a versioned contract-family oracle. Every covered contract and fixture is checksummed; the manifest intentionally does not contain its own checksum.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "oracleManifestVersion",
+    "oracleId",
+    "oracleVersion",
+    "contracts",
+    "generator",
+    "selfCheck",
+    "fixtures"
+  ],
+  "properties": {
+    "oracleManifestVersion": {
+      "const": 1
+    },
+    "oracleId": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "oracleVersion": {
+      "$ref": "#/$defs/semanticVersion"
+    },
+    "contracts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/contract"
+      },
+      "$comment": "Consumers additionally reject duplicate contract paths; JSON Schema cannot express uniqueness by one object property."
+    },
+    "generator": {
+      "$ref": "#/$defs/generator"
+    },
+    "selfCheck": {
+      "$ref": "#/$defs/selfCheck"
+    },
+    "fixtures": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/fixture"
+      },
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "golden"
+              }
+            },
+            "required": ["kind"]
+          },
+          "minContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "boundary"
+              }
+            },
+            "required": ["kind"]
+          },
+          "minContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "negative"
+              }
+            },
+            "required": ["kind"]
+          },
+          "minContains": 1
+        }
+      ],
+      "$comment": "Consumers additionally reject duplicate fixture paths; JSON Schema cannot express uniqueness by one object property."
+    }
+  },
+  "$defs": {
+    "semanticVersion": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "rootRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)[A-Za-z0-9._/-]+$"
+    },
+    "fixtureRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)[a-z0-9][a-z0-9._/-]*\\.json$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "identityValue": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        }
+      ]
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "identity", "sha256"],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/rootRelativePath"
+        },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "value"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z][A-Za-z0-9]*$"
+            },
+            "value": {
+              "$ref": "#/$defs/identityValue"
+            }
+          }
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "implementationPath", "independence"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "version": {
+          "$ref": "#/$defs/semanticVersion"
+        },
+        "implementationPath": {
+          "$ref": "#/$defs/rootRelativePath"
+        },
+        "independence": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 500
+        }
+      }
+    },
+    "selfCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "expectedExitCode"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 120,
+          "pattern": "^corepack pnpm [a-z][a-z0-9:_-]*$"
+        },
+        "expectedExitCode": {
+          "const": 0
+        }
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "kind", "expectation"],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/fixtureRelativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "kind": {
+          "enum": ["golden", "boundary", "negative"]
+        },
+        "expectation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "caseCount"],
+          "properties": {
+            "mode": {
+              "enum": ["all_accept", "all_reject", "case_defined"]
+            },
+            "caseCount": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            }
+          }
+        }
+      }
+    }
+  }
+}
