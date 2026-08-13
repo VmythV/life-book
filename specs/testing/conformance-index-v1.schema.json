@@ -1,0 +1,367 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://life-book.example/specs/testing/conformance-index-v1.schema.json",
+  "$comment": "Status: Draft; Authority: CANDIDATE; stable identity: conformanceIndexVersion=1. A conforming index is CI-generated implementation evidence, never a contract oracle.",
+  "title": "Life Book implementation conformance index v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "conformanceIndexVersion",
+    "generatedBy",
+    "generatedAt",
+    "repository",
+    "git",
+    "toolchain",
+    "suites"
+  ],
+  "properties": {
+    "conformanceIndexVersion": {
+      "const": 1
+    },
+    "generatedBy": {
+      "$ref": "#/$defs/generatedBy"
+    },
+    "generatedAt": {
+      "$ref": "#/$defs/instant"
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "git": {
+      "$ref": "#/$defs/gitIdentity"
+    },
+    "toolchain": {
+      "$ref": "#/$defs/toolchain"
+    },
+    "suites": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/suite"
+      },
+      "$comment": "The verifier additionally rejects duplicate suiteId and requires aggregate status to be recomputed from every required target."
+    }
+  },
+  "$defs": {
+    "instant": {
+      "type": "string",
+      "pattern": "^(?:[0-9]{4})-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+      "$comment": "The independent verifier also checks proleptic Gregorian calendar validity."
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "gitSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9._:-]*$"
+    },
+    "semanticVersion": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 64,
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "rootRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)[A-Za-z0-9._/-]+$"
+    },
+    "immutableArtifactUri": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 500,
+      "pattern": "^(?:https://[^?#]+/(?:artifacts|actions/runs|releases)/[^?#]+|s3://[^?#]+|gs://[^?#]+|oci://[^?#]+)#[0-9a-f]{64}$",
+      "$comment": "A content digest fragment is mandatory; mutable latest URLs and local file paths are invalid evidence."
+    },
+    "generatedBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "provider", "runId", "runAttempt", "workflowRef"],
+      "properties": {
+        "kind": {
+          "const": "ci"
+        },
+        "provider": {
+          "enum": ["github_actions"]
+        },
+        "runId": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "runAttempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "workflowRef": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 300,
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/\\.github/workflows/[A-Za-z0-9_.-]+@refs/(?:heads|tags)/[A-Za-z0-9._/-]+$"
+        }
+      }
+    },
+    "gitIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha", "treeSha256", "ref", "dirty"],
+      "properties": {
+        "sha": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "treeSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 11,
+          "maxLength": 255,
+          "pattern": "^refs/(?:heads|tags)/[A-Za-z0-9._/-]+$"
+        },
+        "dirty": {
+          "const": false
+        }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "pnpm", "lockfileSha256"],
+      "properties": {
+        "node": {
+          "$ref": "#/$defs/semanticVersion"
+        },
+        "pnpm": {
+          "$ref": "#/$defs/semanticVersion"
+        },
+        "lockfileSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "contractDigest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "identity", "sha256"],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/rootRelativePath"
+        },
+        "identity": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 100,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*=[A-Za-z0-9._-]+$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "oracleDigest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifestPath", "manifestSha256", "packageSha256"],
+      "properties": {
+        "manifestPath": {
+          "$ref": "#/$defs/rootRelativePath"
+        },
+        "manifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "packageSha256": {
+          "$ref": "#/$defs/sha256",
+          "$comment": "Digest of the deterministic ordered contract + fixture checksum set, not a directory timestamp."
+        }
+      }
+    },
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component", "language", "version", "artifactSha256"],
+      "properties": {
+        "component": {
+          "$ref": "#/$defs/identifier"
+        },
+        "language": {
+          "enum": ["typescript", "kotlin", "java", "swift", "sqlite", "postgresql"]
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+        },
+        "artifactSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "osVersion", "architecture", "runtime", "runtimeVersion"],
+      "properties": {
+        "os": {
+          "enum": ["android", "ios", "linux", "macos"]
+        },
+        "osVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "architecture": {
+          "enum": ["arm64", "x86_64", "armeabi_v7a"]
+        },
+        "runtime": {
+          "enum": ["hermes", "jvm", "node", "native", "sqlite", "postgresql"]
+        },
+        "runtimeVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "deviceModel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetId",
+        "required",
+        "implementation",
+        "platform",
+        "command",
+        "startedAt",
+        "completedAt",
+        "status",
+        "assertions",
+        "artifactUri"
+      ],
+      "properties": {
+        "targetId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "implementation": {
+          "$ref": "#/$defs/implementation"
+        },
+        "platform": {
+          "$ref": "#/$defs/platform"
+        },
+        "command": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 500
+        },
+        "startedAt": {
+          "$ref": "#/$defs/instant"
+        },
+        "completedAt": {
+          "$ref": "#/$defs/instant"
+        },
+        "status": {
+          "enum": ["pass", "fail", "blocked", "not_applicable"]
+        },
+        "assertions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["passed", "failed", "total"],
+          "properties": {
+            "passed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000000
+            },
+            "failed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000000
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000000
+            }
+          }
+        },
+        "artifactUri": {
+          "$ref": "#/$defs/immutableArtifactUri"
+        }
+      }
+    },
+    "suite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "suiteId",
+        "scope",
+        "contracts",
+        "oracle",
+        "requiredTargetIds",
+        "targets",
+        "status"
+      ],
+      "properties": {
+        "suiteId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 240
+        },
+        "contracts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/contractDigest"
+          }
+        },
+        "oracle": {
+          "$ref": "#/$defs/oracleDigest"
+        },
+        "requiredTargetIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "status": {
+          "enum": ["verified", "failed", "blocked"]
+        }
+      }
+    }
+  }
+}
