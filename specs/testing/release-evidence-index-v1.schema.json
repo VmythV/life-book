@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://life-book.example/specs/testing/release-evidence-index-v1.schema.json",
+  "$comment": "Status: Draft; Authority: CANDIDATE; stable identity: releaseEvidenceIndexVersion=1. A conforming index is generated release-candidate evidence and cannot be satisfied by local or debug-signed builds.",
+  "title": "Life Book release evidence index v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "releaseEvidenceIndexVersion",
+    "generatedBy",
+    "generatedAt",
+    "repository",
+    "git",
+    "candidate",
+    "conformance",
+    "checks",
+    "status"
+  ],
+  "properties": {
+    "releaseEvidenceIndexVersion": {
+      "const": 1
+    },
+    "generatedBy": {
+      "$ref": "#/$defs/generatedBy"
+    },
+    "generatedAt": {
+      "$ref": "#/$defs/instant"
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "git": {
+      "$ref": "#/$defs/gitIdentity"
+    },
+    "candidate": {
+      "$ref": "#/$defs/candidate"
+    },
+    "conformance": {
+      "$ref": "#/$defs/conformanceReference"
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/check"
+      },
+      "$comment": "The verifier rejects duplicate checkId and recomputes overall status from every required check."
+    },
+    "status": {
+      "enum": ["verified", "failed", "blocked"]
+    }
+  },
+  "$defs": {
+    "instant": {
+      "type": "string",
+      "pattern": "^(?:[0-9]{4})-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "gitSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9._:-]*$"
+    },
+    "immutableArtifactUri": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 500,
+      "pattern": "^(?:https://[^?#]+/(?:artifacts|actions/runs|releases)/[^?#]+|s3://[^?#]+|gs://[^?#]+|oci://[^?#]+)#[0-9a-f]{64}$"
+    },
+    "generatedBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "provider", "runId", "runAttempt", "workflowRef"],
+      "properties": {
+        "kind": {
+          "const": "ci"
+        },
+        "provider": {
+          "enum": ["github_actions"]
+        },
+        "runId": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "runAttempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "workflowRef": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 300,
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/\\.github/workflows/[A-Za-z0-9_.-]+@refs/(?:heads|tags)/[A-Za-z0-9._/-]+$"
+        }
+      }
+    },
+    "gitIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha", "treeSha256", "ref", "dirty"],
+      "properties": {
+        "sha": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "treeSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 11,
+          "maxLength": 255,
+          "pattern": "^refs/(?:heads|tags)/[A-Za-z0-9._/-]+$"
+        },
+        "dirty": {
+          "const": false
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidateId",
+        "version",
+        "platform",
+        "applicationId",
+        "buildVariant",
+        "debuggable",
+        "signed",
+        "artifactSha256",
+        "signingCertificateSha256",
+        "artifactUri"
+      ],
+      "properties": {
+        "candidateId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+        },
+        "platform": {
+          "enum": ["android", "ios"]
+        },
+        "applicationId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$"
+        },
+        "buildVariant": {
+          "enum": ["release_candidate"]
+        },
+        "debuggable": {
+          "const": false
+        },
+        "signed": {
+          "const": true
+        },
+        "artifactSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "signingCertificateSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "artifactUri": {
+          "$ref": "#/$defs/immutableArtifactUri"
+        }
+      }
+    },
+    "conformanceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["indexVersion", "gitSha", "indexSha256", "artifactUri", "status"],
+      "properties": {
+        "indexVersion": {
+          "const": 1
+        },
+        "gitSha": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "indexSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "artifactUri": {
+          "$ref": "#/$defs/immutableArtifactUri"
+        },
+        "status": {
+          "const": "verified"
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkId",
+        "category",
+        "required",
+        "environment",
+        "command",
+        "startedAt",
+        "completedAt",
+        "status",
+        "artifactUri"
+      ],
+      "properties": {
+        "checkId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "category": {
+          "enum": [
+            "acceptance",
+            "upgrade_recovery",
+            "platform_security",
+            "privacy_legal",
+            "operations",
+            "performance",
+            "accessibility",
+            "signing",
+            "rollout_rollback"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "environment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "identity"],
+          "properties": {
+            "kind": {
+              "enum": ["ci", "emulator", "physical_device", "controlled_service"]
+            },
+            "identity": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 300
+            }
+          }
+        },
+        "command": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 500
+        },
+        "startedAt": {
+          "$ref": "#/$defs/instant"
+        },
+        "completedAt": {
+          "$ref": "#/$defs/instant"
+        },
+        "status": {
+          "enum": ["pass", "fail", "blocked", "not_applicable"]
+        },
+        "artifactUri": {
+          "$ref": "#/$defs/immutableArtifactUri"
+        }
+      }
+    }
+  }
+}
