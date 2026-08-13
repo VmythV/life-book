@@ -1,0 +1,353 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://life-book.example/specs/security/installation-anchor-v1.schema.json",
+  "$comment": "Status: Draft; Authority: CANDIDATE; identities: installationAnchorEnvelopeVersion=1, installationAnchorPayloadVersion=1, scalarEncodingVersion=1. The root validates the encrypted slot object; decrypted payloads use the named $defs schemas.",
+  "title": "Life Book installation anchor v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "envelopeFormatVersion",
+    "recordKind",
+    "slotId",
+    "installationAnchorKeyId",
+    "nonce",
+    "ciphertext",
+    "tag"
+  ],
+  "properties": {
+    "envelopeFormatVersion": {
+      "const": 1
+    },
+    "recordKind": {
+      "enum": ["install_presence", "installation_bootstrap"]
+    },
+    "slotId": {
+      "$ref": "#/$defs/slotId"
+    },
+    "installationAnchorKeyId": {
+      "$ref": "#/$defs/base64url16"
+    },
+    "nonce": {
+      "$ref": "#/$defs/base64url12"
+    },
+    "ciphertext": {
+      "$ref": "#/$defs/base64urlVariable"
+    },
+    "tag": {
+      "$ref": "#/$defs/base64url16"
+    }
+  },
+  "$defs": {
+    "slotId": {
+      "enum": ["a", "b"]
+    },
+    "base64url12": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 16,
+      "pattern": "^[A-Za-z0-9_-]{16}$"
+    },
+    "base64url16": {
+      "type": "string",
+      "minLength": 22,
+      "maxLength": 22,
+      "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$"
+    },
+    "base64url32": {
+      "type": "string",
+      "minLength": 43,
+      "maxLength": 43,
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+    },
+    "base64urlVariable": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 65000,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "$comment": "The protocol parser decodes and re-encodes to prove canonical base64url and enforces the 64 KiB whole-file limit."
+    },
+    "entityId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "longCounter": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 19,
+      "pattern": "^(?:0|[1-9][0-9]{0,18})$",
+      "$comment": "The protocol parser additionally enforces the scalar v1 maximum 9223372036854775807."
+    },
+    "instant": {
+      "type": "string",
+      "minLength": 24,
+      "maxLength": 24,
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+      "$comment": "The protocol parser additionally enforces proleptic Gregorian validity and years 0001 through 9999."
+    },
+    "sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "androidApplicationId": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 255,
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$"
+    },
+    "appBuildId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+    },
+    "nullableEntityId": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/entityId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullableLongCounter": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/longCounter"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullableSha256": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "installPresenceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "presenceSequence",
+        "installationAnchorKeyId",
+        "installationId",
+        "installationIncarnationId",
+        "incarnationBootstrapOperationId",
+        "presenceNonce",
+        "applicationId",
+        "createdAt"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "presenceSequence": {
+          "$ref": "#/$defs/longCounter"
+        },
+        "installationAnchorKeyId": {
+          "$ref": "#/$defs/base64url16"
+        },
+        "installationId": {
+          "$ref": "#/$defs/entityId"
+        },
+        "installationIncarnationId": {
+          "$ref": "#/$defs/entityId"
+        },
+        "incarnationBootstrapOperationId": {
+          "$ref": "#/$defs/entityId"
+        },
+        "presenceNonce": {
+          "$ref": "#/$defs/base64url32"
+        },
+        "applicationId": {
+          "$ref": "#/$defs/androidApplicationId"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/instant"
+        }
+      }
+    },
+    "installationBootstrapRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "bootstrapSequence",
+        "installationIncarnationId",
+        "installationId",
+        "incarnationBootstrapOperationId",
+        "stateOperationId",
+        "activeOperationId",
+        "notificationDatasetEpoch",
+        "phase",
+        "installPresenceRecordDigest",
+        "candidateGenerationId",
+        "initializedGenerationId",
+        "initializedControlSequence",
+        "activationOpenReceiptDigest",
+        "appBuildId",
+        "createdAt"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "bootstrapSequence": {
+          "$ref": "#/$defs/longCounter"
+        },
+        "installationIncarnationId": {
+          "$ref": "#/$defs/entityId"
+        },
+        "installationId": {
+          "$ref": "#/$defs/entityId"
+        },
+        "incarnationBootstrapOperationId": {
+          "$ref": "#/$defs/entityId"
+        },
+        "stateOperationId": {
+          "$ref": "#/$defs/nullableEntityId"
+        },
+        "activeOperationId": {
+          "$ref": "#/$defs/nullableEntityId"
+        },
+        "notificationDatasetEpoch": {
+          "$ref": "#/$defs/longCounter"
+        },
+        "phase": {
+          "enum": ["initializing", "initialized", "clearing"]
+        },
+        "installPresenceRecordDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "candidateGenerationId": {
+          "$ref": "#/$defs/nullableEntityId"
+        },
+        "initializedGenerationId": {
+          "$ref": "#/$defs/nullableEntityId"
+        },
+        "initializedControlSequence": {
+          "$ref": "#/$defs/nullableLongCounter"
+        },
+        "activationOpenReceiptDigest": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "appBuildId": {
+          "$ref": "#/$defs/appBuildId"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/instant"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "phase": {
+                "const": "initializing"
+              }
+            },
+            "required": ["phase"]
+          },
+          "then": {
+            "properties": {
+              "stateOperationId": {
+                "$ref": "#/$defs/entityId"
+              },
+              "activeOperationId": {
+                "type": "null"
+              },
+              "notificationDatasetEpoch": {
+                "const": "0"
+              },
+              "initializedGenerationId": {
+                "type": "null"
+              },
+              "initializedControlSequence": {
+                "type": "null"
+              },
+              "activationOpenReceiptDigest": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "phase": {
+                "const": "initialized"
+              }
+            },
+            "required": ["phase"]
+          },
+          "then": {
+            "properties": {
+              "stateOperationId": {
+                "type": "null"
+              },
+              "activeOperationId": {
+                "$ref": "#/$defs/entityId"
+              },
+              "candidateGenerationId": {
+                "type": "null"
+              },
+              "initializedGenerationId": {
+                "$ref": "#/$defs/entityId"
+              },
+              "initializedControlSequence": {
+                "$ref": "#/$defs/longCounter"
+              },
+              "activationOpenReceiptDigest": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "phase": {
+                "const": "clearing"
+              }
+            },
+            "required": ["phase"]
+          },
+          "then": {
+            "properties": {
+              "stateOperationId": {
+                "$ref": "#/$defs/entityId"
+              },
+              "activeOperationId": {
+                "$ref": "#/$defs/entityId"
+              },
+              "candidateGenerationId": {
+                "type": "null"
+              },
+              "initializedGenerationId": {
+                "$ref": "#/$defs/entityId"
+              },
+              "initializedControlSequence": {
+                "$ref": "#/$defs/longCounter"
+              },
+              "activationOpenReceiptDigest": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          }
+        }
+      ],
+      "$comment": "The protocol additionally enforces stateOperationId equality in initializing, compatible presence identity, and journal-bound clearing/active tuples."
+    }
+  }
+}
