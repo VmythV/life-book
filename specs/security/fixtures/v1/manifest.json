@@ -1,0 +1,78 @@
+{
+  "oracleManifestVersion": 1,
+  "oracleId": "installation_security_v1",
+  "oracleVersion": "1.0.0",
+  "contracts": [
+    {
+      "path": "specs/security/installation-anchor-v1.md",
+      "identity": {
+        "name": "installationAnchorProtocolVersion",
+        "value": 1
+      },
+      "sha256": "2642e9d9e7adc6370728913558c96c3f2c5e3cf1e6afcd2d5e906bba2c5158f4"
+    },
+    {
+      "path": "specs/security/installation-anchor-v1.schema.json",
+      "identity": {
+        "name": "installationAnchorSchemaVersion",
+        "value": 1
+      },
+      "sha256": "f574cd9b7b86afd9c213d18d286df4de544f0675f8c7f155394d7d0381b673e1"
+    },
+    {
+      "path": "specs/security/device-key-envelope-v1.md",
+      "identity": {
+        "name": "deviceKeyEnvelopeProtocolVersion",
+        "value": 1
+      },
+      "sha256": "483b7b0782b9374eae8355a62a4a62a8a32c69da08df32b98a2a59060d164339"
+    },
+    {
+      "path": "specs/security/device-key-envelope-v1.schema.json",
+      "identity": {
+        "name": "deviceKeyEnvelopeSchemaVersion",
+        "value": 1
+      },
+      "sha256": "364f6d7740ad770001125d93a8081fb904832cd3c53e6cb491a2941766332cfd"
+    }
+  ],
+  "generator": {
+    "name": "independent-android-installation-security-oracle",
+    "version": "1.0.0",
+    "implementationPath": "tools/oracles/check-security-v1.mjs",
+    "independence": "Node crypto, separately encoded RFC 8785 ordering, strict scalar checks, and deterministic selectors recompute expectations without importing the Android Key Manager or product scalar package."
+  },
+  "selfCheck": {
+    "command": "corepack pnpm oracle:security:check",
+    "expectedExitCode": 0
+  },
+  "fixtures": [
+    {
+      "path": "golden.json",
+      "sha256": "9cb91b773c93f85538e1a9c571329fc266578364fdf44c57d1ce429e5c623ecb",
+      "kind": "golden",
+      "expectation": {
+        "mode": "all_accept",
+        "caseCount": 12
+      }
+    },
+    {
+      "path": "boundary.json",
+      "sha256": "6d3b388b85dceba0e1ca373d00d5d0f4b6205ce537259b2c4881f7dc4e995091",
+      "kind": "boundary",
+      "expectation": {
+        "mode": "case_defined",
+        "caseCount": 12
+      }
+    },
+    {
+      "path": "negative.json",
+      "sha256": "d9c31b090144d90e719d61b5f0fd8f385a036f3de1d5f673a74560e949be669c",
+      "kind": "negative",
+      "expectation": {
+        "mode": "case_defined",
+        "caseCount": 26
+      }
+    }
+  ]
+}
