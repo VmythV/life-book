@@ -1,0 +1,308 @@
+{
+  "fixtureVersion": 1,
+  "scalarEncodingVersion": 1,
+  "kind": "boundary",
+  "cases": [
+    {
+      "id": "entity_id.low_variant_boundary",
+      "scalar": "entity_id",
+      "operation": "parse",
+      "input": "00000000-0000-4000-8000-000000000001",
+      "expected": "00000000-0000-4000-8000-000000000001"
+    },
+    {
+      "id": "entity_id.high_variant_boundary",
+      "scalar": "entity_id",
+      "operation": "parse",
+      "input": "ffffffff-ffff-4fff-bfff-ffffffffffff",
+      "expected": "ffffffff-ffff-4fff-bfff-ffffffffffff"
+    },
+    {
+      "id": "instant.minimum",
+      "scalar": "instant",
+      "operation": "parse_canonical",
+      "input": "0001-01-01T00:00:00.000Z",
+      "expected": {
+        "epochMilliseconds": -62135596800000,
+        "canonical": "0001-01-01T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "instant.maximum",
+      "scalar": "instant",
+      "operation": "parse_canonical",
+      "input": "9999-12-31T23:59:59.999Z",
+      "expected": {
+        "epochMilliseconds": 253402300799999,
+        "canonical": "9999-12-31T23:59:59.999Z"
+      }
+    },
+    {
+      "id": "instant.non_leap_century",
+      "scalar": "instant",
+      "operation": "parse_canonical",
+      "input": "1900-03-01T00:00:00.000Z",
+      "expected": {
+        "epochMilliseconds": -2203891200000,
+        "canonical": "1900-03-01T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "instant.offset_crosses_day",
+      "scalar": "instant",
+      "operation": "normalize_offset",
+      "input": "1970-01-01T00:00:00.000+00:01",
+      "expected": {
+        "epochMilliseconds": -60000,
+        "canonical": "1969-12-31T23:59:00.000Z"
+      }
+    },
+    {
+      "id": "instant.offset_below_minimum",
+      "scalar": "instant",
+      "operation": "normalize_offset",
+      "input": "0001-01-01T00:00:00.000+00:01",
+      "expectedError": "instant_out_of_range"
+    },
+    {
+      "id": "local_date.minimum",
+      "scalar": "local_date",
+      "operation": "parse",
+      "input": "0001-01-01",
+      "expected": "0001-01-01"
+    },
+    {
+      "id": "local_date.maximum",
+      "scalar": "local_date",
+      "operation": "parse",
+      "input": "9999-12-31",
+      "expected": "9999-12-31"
+    },
+    {
+      "id": "local_date.divisible_by_400",
+      "scalar": "local_date",
+      "operation": "parse",
+      "input": "2000-02-29",
+      "expected": "2000-02-29"
+    },
+    {
+      "id": "local_time.minimum",
+      "scalar": "local_time",
+      "operation": "parse",
+      "input": "00:00:00",
+      "expected": {
+        "seconds": 0,
+        "canonical": "00:00:00"
+      }
+    },
+    {
+      "id": "local_time.maximum",
+      "scalar": "local_time",
+      "operation": "parse",
+      "input": "23:59:59",
+      "expected": {
+        "seconds": 86399,
+        "canonical": "23:59:59"
+      }
+    },
+    {
+      "id": "time_zone.alias_resolver_boundary",
+      "scalar": "time_zone_id",
+      "operation": "resolve",
+      "input": {
+        "value": "Etc/UTC",
+        "resolver": {
+          "kind": "alias",
+          "canonical": "UTC"
+        }
+      },
+      "expected": "UTC"
+    },
+    {
+      "id": "exact_decimal.maximum",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "999999999999999.999",
+      "expected": {
+        "scaled": "999999999999999999",
+        "canonical": "999999999999999.999"
+      }
+    },
+    {
+      "id": "exact_decimal.minimum",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "-999999999999999.999",
+      "expected": {
+        "scaled": "-999999999999999999",
+        "canonical": "-999999999999999.999"
+      }
+    },
+    {
+      "id": "exact_decimal.above_maximum",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "1000000000000000",
+      "expectedError": "exact_decimal_out_of_range"
+    },
+    {
+      "id": "exact_decimal.scaled_maximum",
+      "scalar": "exact_decimal",
+      "operation": "parse_scaled",
+      "input": "999999999999999999",
+      "expected": "999999999999999999"
+    },
+    {
+      "id": "exact_decimal.scaled_minimum",
+      "scalar": "exact_decimal",
+      "operation": "format_scaled",
+      "input": "-999999999999999999",
+      "expected": "-999999999999999.999"
+    },
+    {
+      "id": "sort_key.left_boundary",
+      "scalar": "sort_key",
+      "operation": "parse",
+      "input": "00000000000000000000000000000000",
+      "expected": {
+        "decimal": "0",
+        "assignable": false
+      }
+    },
+    {
+      "id": "sort_key.right_boundary",
+      "scalar": "sort_key",
+      "operation": "parse",
+      "input": "ffffffffffffffffffffffffffffffff",
+      "expected": {
+        "decimal": "340282366920938463463374607431768211455",
+        "assignable": false
+      }
+    },
+    {
+      "id": "sort_key.reserved_assignment",
+      "scalar": "sort_key",
+      "operation": "assign",
+      "input": "00000000000000000000000000000000",
+      "expectedError": "reserved_sort_key"
+    },
+    {
+      "id": "sort_key.one_unit_gap",
+      "scalar": "sort_key",
+      "operation": "midpoint",
+      "input": {
+        "left": "00000000000000000000000000000001",
+        "right": "00000000000000000000000000000002"
+      },
+      "expectedError": "sort_key_gap_exhausted"
+    },
+    {
+      "id": "sort_key.duplicate_key_id_tiebreak",
+      "scalar": "sort_key",
+      "operation": "rebalance",
+      "input": [
+        {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "sortKey": "10000000000000000000000000000000"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "sortKey": "10000000000000000000000000000000"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "sortKey": "10000000000000000000000000000000"
+        }
+      ],
+      "expected": [
+        {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "sortKey": "3fffffffffffffffffffffffffffffff"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "sortKey": "7fffffffffffffffffffffffffffffff"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "sortKey": "bfffffffffffffffffffffffffffffff"
+        }
+      ]
+    },
+    {
+      "id": "revision.minimum",
+      "scalar": "revision",
+      "operation": "parse",
+      "input": 1,
+      "expected": 1
+    },
+    {
+      "id": "revision.maximum",
+      "scalar": "revision",
+      "operation": "parse",
+      "input": 4294967295,
+      "expected": 4294967295
+    },
+    {
+      "id": "revision.maximum_increment",
+      "scalar": "revision",
+      "operation": "increment",
+      "input": 4294967295,
+      "expectedError": "revision_exhausted"
+    },
+    {
+      "id": "long_counter.number_safe_maximum",
+      "scalar": "long_counter",
+      "operation": "parse",
+      "input": "9007199254740991",
+      "expected": "9007199254740991"
+    },
+    {
+      "id": "long_counter.first_number_unsafe_integer",
+      "scalar": "long_counter",
+      "operation": "parse",
+      "input": "9007199254740992",
+      "expected": "9007199254740992"
+    },
+    {
+      "id": "long_counter.maximum",
+      "scalar": "long_counter",
+      "operation": "parse",
+      "input": "9223372036854775807",
+      "expected": "9223372036854775807"
+    },
+    {
+      "id": "long_counter.maximum_increment",
+      "scalar": "long_counter",
+      "operation": "increment",
+      "input": "9223372036854775807",
+      "expectedError": "long_counter_exhausted"
+    },
+    {
+      "id": "json_policy.optional_absent",
+      "scalar": "json_policy",
+      "operation": "presence",
+      "input": {
+        "object": {},
+        "field": "note",
+        "nullable": false,
+        "optional": true
+      },
+      "expected": {
+        "state": "absent"
+      }
+    },
+    {
+      "id": "json_policy.required_absent",
+      "scalar": "json_policy",
+      "operation": "presence",
+      "input": {
+        "object": {},
+        "field": "note",
+        "nullable": true,
+        "optional": false
+      },
+      "expectedError": "invalid_json_scalar"
+    }
+  ]
+}
