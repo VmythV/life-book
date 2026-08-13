@@ -1,0 +1,54 @@
+[
+  {
+    "name": "presentation cannot import an adapter",
+    "expectedRule": "presentation_to_adapter",
+    "files": {
+      "/virtual/apps/mobile/src/modules/alpha/presentation/screen.ts": "import '../adapters/sqlite-adapter';\n",
+      "/virtual/apps/mobile/src/modules/alpha/adapters/sqlite-adapter.ts": "export {};\n"
+    }
+  },
+  {
+    "name": "domain cannot import React Native",
+    "expectedRule": "domain_to_platform",
+    "files": {
+      "/virtual/apps/mobile/src/modules/alpha/domain/entity.ts": "import { View } from 'react-native';\nexport const value = View;\n"
+    }
+  },
+  {
+    "name": "modules cannot deep-import another module",
+    "expectedRule": "cross_module_deep_import",
+    "files": {
+      "/virtual/apps/mobile/src/modules/alpha/application/use-case.ts": "import '../../beta/domain/private-rule';\n",
+      "/virtual/apps/mobile/src/modules/beta/domain/private-rule.ts": "export {};\n"
+    }
+  },
+  {
+    "name": "production cannot import test support",
+    "expectedRule": "production_to_test_support",
+    "files": {
+      "/virtual/apps/mobile/src/shell/application/use-case.ts": "import '@life-book/test-support';\n"
+    }
+  },
+  {
+    "name": "only composition can import adapter constructors",
+    "expectedRule": "adapter_import_outside_composition",
+    "files": {
+      "/virtual/apps/mobile/src/shell/application/use-case.ts": "import '../adapters/platform-adapter';\n",
+      "/virtual/apps/mobile/src/shell/adapters/platform-adapter.ts": "export {};\n"
+    }
+  },
+  {
+    "name": "stage-gated SDKs cannot be registered",
+    "expectedRule": "stage_gated_sdk_import",
+    "files": {
+      "/virtual/apps/mobile/src/composition/invalid-root.ts": "import * as Notifications from 'expo-notifications';\nexport { Notifications };\n"
+    }
+  },
+  {
+    "name": "domain cannot read implicit time or randomness",
+    "expectedRule": "domain_to_implicit_source",
+    "files": {
+      "/virtual/apps/mobile/src/modules/alpha/domain/entity.ts": "export const createdAt = Date.now();\n"
+    }
+  }
+]
