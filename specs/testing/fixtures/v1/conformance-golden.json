@@ -1,0 +1,87 @@
+{
+  "fixtureVersion": 1,
+  "kind": "golden",
+  "schema": "conformance",
+  "baseIndex": {
+    "conformanceIndexVersion": 1,
+    "generatedBy": {
+      "kind": "ci",
+      "provider": "github_actions",
+      "runId": "123456789",
+      "runAttempt": 1,
+      "workflowRef": "life-book/life-book/.github/workflows/conformance.yml@refs/heads/main"
+    },
+    "generatedAt": "2026-08-13T08:00:00.000Z",
+    "repository": "life-book/life-book",
+    "git": {
+      "sha": "1111111111111111111111111111111111111111",
+      "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "ref": "refs/heads/main",
+      "dirty": false
+    },
+    "toolchain": {
+      "node": "24.13.0",
+      "pnpm": "11.21.0",
+      "lockfileSha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "suites": [
+      {
+        "suiteId": "scalar_v1",
+        "scope": "TypeScript scalar v1 implementation conformance",
+        "contracts": [
+          {
+            "path": "specs/scalars/v1.md",
+            "identity": "scalarEncodingVersion=1",
+            "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+          }
+        ],
+        "oracle": {
+          "manifestPath": "specs/scalars/fixtures/v1/manifest.json",
+          "manifestSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "packageSha256": "6666666666666666666666666666666666666666666666666666666666666666"
+        },
+        "requiredTargetIds": ["typescript_hermes_android"],
+        "targets": [
+          {
+            "targetId": "typescript_hermes_android",
+            "required": true,
+            "implementation": {
+              "component": "life-book.scalar",
+              "language": "typescript",
+              "version": "1.0.0",
+              "artifactSha256": "7777777777777777777777777777777777777777777777777777777777777777"
+            },
+            "platform": {
+              "os": "android",
+              "osVersion": "16",
+              "architecture": "arm64",
+              "runtime": "hermes",
+              "runtimeVersion": "1.0.0",
+              "deviceModel": "controlled-test-device"
+            },
+            "command": "corepack pnpm conformance:scalar:android",
+            "startedAt": "2026-08-13T07:55:00.000Z",
+            "completedAt": "2026-08-13T07:59:00.000Z",
+            "status": "pass",
+            "assertions": {
+              "passed": 118,
+              "failed": 0,
+              "total": 118
+            },
+            "artifactUri": "https://github.com/life-book/life-book/actions/runs/123456789/artifacts/987654321#8888888888888888888888888888888888888888888888888888888888888888"
+          }
+        ],
+        "status": "verified"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "conformance.complete_verified_index",
+      "mutation": {
+        "operation": "none"
+      },
+      "expectedValid": true
+    }
+  ]
+}
