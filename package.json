@@ -1,0 +1,47 @@
+{
+  "name": "life-book",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": "24.13.0",
+    "pnpm": "11.21.0"
+  },
+  "scripts": {
+    "preinstall": "node tools/toolchain/check.mjs",
+    "format": "prettier --write .github apps evidence packages specs/scalars specs/security specs/testing tools package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.js prettier.config.mjs vitest.config.mjs",
+    "format:check": "prettier --check .github apps evidence packages specs/scalars specs/security specs/testing tools package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.js prettier.config.mjs vitest.config.mjs",
+    "lint": "eslint apps packages tools *.config.* --max-warnings 0",
+    "typecheck": "node tools/workspace/run-recursive-script.mjs typecheck",
+    "test:unit": "vitest run --config vitest.config.mjs",
+    "test:architecture": "node tools/architecture/check.mjs --self-test",
+    "docs:check": "node tools/docs/check.mjs",
+    "oracle:manifest:check": "node tools/oracles/check-oracle-manifest-v1.mjs",
+    "oracle:evidence:check": "node tools/oracles/check-evidence-index-v1.mjs",
+    "oracle:testing:check": "node tools/oracles/check-testing-v1.mjs",
+    "oracle:scalars:check": "node tools/oracles/check-scalars-v1.mjs",
+    "oracle:security:check": "node tools/oracles/check-security-v1.mjs",
+    "specs:check": "node tools/specs/check.mjs",
+    "deps:check": "node tools/dependencies/check.mjs",
+    "secrets:scan": "node tools/secrets/check.mjs --self-test",
+    "generate": "node tools/generate/design-tokens.mjs",
+    "generate:check": "node tools/generate/design-tokens.mjs --check",
+    "native:generate:check": "node tools/native/check.mjs",
+    "spike:android:isolation:check": "node tools/spike/check-android-capability-isolation.mjs",
+    "bundle:mobile:check": "node tools/mobile/check-bundle.mjs",
+    "build:mobile:android": "corepack pnpm --filter @life-book/mobile run build:android",
+    "build:spike:android": "node tools/spike/run-android-capability-build.mjs",
+    "verify": "node tools/verify.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "ajv": "8.20.0",
+    "eslint": "9.39.5",
+    "eslint-config-expo": "57.0.1",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.9.0",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}
