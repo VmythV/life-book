@@ -1,0 +1,5 @@
+packages:
+  - apps/*
+  - packages/*
+overrides:
+  'semver@>=6.0.0 <6.3.1': 6.3.1
