@@ -1,0 +1,104 @@
+{
+  "fixtureVersion": 1,
+  "kind": "boundary",
+  "schema": "oracle_manifest",
+  "baseManifest": {
+    "oracleManifestVersion": 1,
+    "oracleId": "example_oracle",
+    "oracleVersion": "1.0.0",
+    "contracts": [
+      {
+        "path": "specs/example/contract-v1.json",
+        "identity": {
+          "name": "exampleContractVersion",
+          "value": 1
+        },
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "generator": {
+      "name": "independent-example",
+      "version": "1.0.0",
+      "implementationPath": "tools/oracles/example.mjs",
+      "independence": "Independent example implementation used only by the schema oracle."
+    },
+    "selfCheck": {
+      "command": "corepack pnpm oracle:example",
+      "expectedExitCode": 0
+    },
+    "fixtures": [
+      {
+        "path": "golden.json",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "kind": "golden",
+        "expectation": {
+          "mode": "all_accept",
+          "caseCount": 1
+        }
+      },
+      {
+        "path": "boundary.json",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "kind": "boundary",
+        "expectation": {
+          "mode": "case_defined",
+          "caseCount": 1
+        }
+      },
+      {
+        "path": "negative.json",
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "kind": "negative",
+        "expectation": {
+          "mode": "all_reject",
+          "caseCount": 1
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "minimum_oracle_id_length",
+      "mutation": {
+        "operation": "set",
+        "path": ["oracleId"],
+        "value": "abc"
+      },
+      "expectedValid": true
+    },
+    {
+      "id": "zero_semantic_version",
+      "mutation": {
+        "operation": "set",
+        "path": ["oracleVersion"],
+        "value": "0.0.0"
+      },
+      "expectedValid": true
+    },
+    {
+      "id": "maximum_integer_contract_identity",
+      "mutation": {
+        "operation": "set",
+        "path": ["contracts", 0, "identity", "value"],
+        "value": 4294967295
+      },
+      "expectedValid": true
+    },
+    {
+      "id": "multiple_distinct_contracts",
+      "mutation": {
+        "operation": "set",
+        "path": ["contracts", 1],
+        "value": {
+          "path": "specs/example/paired-v1.schema.json",
+          "identity": {
+            "name": "pairedContractVersion",
+            "value": "1.0.0"
+          },
+          "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+        }
+      },
+      "expectedValid": true
+    }
+  ]
+}
