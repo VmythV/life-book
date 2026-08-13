@@ -1,0 +1,68 @@
+{
+  "fixtureVersion": 1,
+  "kind": "golden",
+  "schema": "oracle_manifest",
+  "baseManifest": {
+    "oracleManifestVersion": 1,
+    "oracleId": "example_oracle",
+    "oracleVersion": "1.0.0",
+    "contracts": [
+      {
+        "path": "specs/example/contract-v1.json",
+        "identity": {
+          "name": "exampleContractVersion",
+          "value": 1
+        },
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "generator": {
+      "name": "independent-example",
+      "version": "1.0.0",
+      "implementationPath": "tools/oracles/example.mjs",
+      "independence": "Independent example implementation used only by the schema oracle."
+    },
+    "selfCheck": {
+      "command": "corepack pnpm oracle:example",
+      "expectedExitCode": 0
+    },
+    "fixtures": [
+      {
+        "path": "golden.json",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "kind": "golden",
+        "expectation": {
+          "mode": "all_accept",
+          "caseCount": 1
+        }
+      },
+      {
+        "path": "boundary.json",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "kind": "boundary",
+        "expectation": {
+          "mode": "case_defined",
+          "caseCount": 1
+        }
+      },
+      {
+        "path": "negative.json",
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "kind": "negative",
+        "expectation": {
+          "mode": "all_reject",
+          "caseCount": 1
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "complete_manifest_is_valid",
+      "mutation": {
+        "operation": "none"
+      },
+      "expectedValid": true
+    }
+  ]
+}
