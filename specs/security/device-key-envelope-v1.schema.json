@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://life-book.example/specs/security/device-key-envelope-v1.schema.json",
+  "$comment": "Status: Draft; Authority: CANDIDATE; identities: deviceKeyEnvelopeVersion=1, scalarEncodingVersion=1. This exact JCS candidate must remain inactive until the TD-004 authority migration audit approves the encoding choice.",
+  "title": "Life Book Android device key envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "envelopeFormatVersion",
+    "recordKind",
+    "slotId",
+    "envelopeSequence",
+    "installationId",
+    "installationIncarnationId",
+    "keyPurpose",
+    "keyId",
+    "deviceWrappingKeyId",
+    "wrappingAlgorithm",
+    "nonce",
+    "ciphertext",
+    "tag",
+    "createdAt"
+  ],
+  "properties": {
+    "envelopeFormatVersion": {
+      "const": 1
+    },
+    "recordKind": {
+      "const": "device_key"
+    },
+    "slotId": {
+      "enum": ["a", "b"]
+    },
+    "envelopeSequence": {
+      "$ref": "#/$defs/longCounter"
+    },
+    "installationId": {
+      "$ref": "#/$defs/entityId"
+    },
+    "installationIncarnationId": {
+      "$ref": "#/$defs/entityId"
+    },
+    "keyPurpose": {
+      "enum": ["database_data_key", "attachment_root_key", "dataset_control_key"]
+    },
+    "keyId": {
+      "$ref": "#/$defs/base64url16"
+    },
+    "deviceWrappingKeyId": {
+      "$ref": "#/$defs/base64url16"
+    },
+    "wrappingAlgorithm": {
+      "const": "aes_256_gcm_v1"
+    },
+    "nonce": {
+      "$ref": "#/$defs/base64url12"
+    },
+    "ciphertext": {
+      "$ref": "#/$defs/base64url32"
+    },
+    "tag": {
+      "$ref": "#/$defs/base64url16"
+    },
+    "createdAt": {
+      "$ref": "#/$defs/instant"
+    }
+  },
+  "$defs": {
+    "base64url12": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 16,
+      "pattern": "^[A-Za-z0-9_-]{16}$"
+    },
+    "base64url16": {
+      "type": "string",
+      "minLength": 22,
+      "maxLength": 22,
+      "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$"
+    },
+    "base64url32": {
+      "type": "string",
+      "minLength": 43,
+      "maxLength": 43,
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+    },
+    "entityId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "longCounter": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 19,
+      "pattern": "^(?:0|[1-9][0-9]{0,18})$",
+      "$comment": "The protocol parser additionally enforces the scalar v1 maximum 9223372036854775807."
+    },
+    "instant": {
+      "type": "string",
+      "minLength": 24,
+      "maxLength": 24,
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+      "$comment": "The protocol parser additionally enforces proleptic Gregorian validity and years 0001 through 9999."
+    }
+  }
+}
