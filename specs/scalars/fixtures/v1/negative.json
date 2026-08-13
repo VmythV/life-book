@@ -1,0 +1,444 @@
+{
+  "fixtureVersion": 1,
+  "scalarEncodingVersion": 1,
+  "kind": "negative",
+  "cases": [
+    {
+      "id": "entity_id.nil_uuid",
+      "scalar": "entity_id",
+      "operation": "parse",
+      "input": "00000000-0000-0000-0000-000000000000",
+      "expectedError": "invalid_entity_id"
+    },
+    {
+      "id": "entity_id.uppercase",
+      "scalar": "entity_id",
+      "operation": "parse",
+      "input": "550E8400-E29B-41D4-A716-446655440000",
+      "expectedError": "invalid_entity_id"
+    },
+    {
+      "id": "entity_id.version_7",
+      "scalar": "entity_id",
+      "operation": "parse",
+      "input": "550e8400-e29b-71d4-a716-446655440000",
+      "expectedError": "invalid_entity_id"
+    },
+    {
+      "id": "entity_id.invalid_variant",
+      "scalar": "entity_id",
+      "operation": "parse",
+      "input": "550e8400-e29b-41d4-7716-446655440000",
+      "expectedError": "invalid_entity_id"
+    },
+    {
+      "id": "entity_id.missing_hyphens",
+      "scalar": "entity_id",
+      "operation": "parse",
+      "input": "550e8400e29b41d4a716446655440000",
+      "expectedError": "invalid_entity_id"
+    },
+    {
+      "id": "instant.missing_milliseconds",
+      "scalar": "instant",
+      "operation": "parse_canonical",
+      "input": "1970-01-01T00:00:00Z",
+      "expectedError": "invalid_instant"
+    },
+    {
+      "id": "instant.offset_not_canonical",
+      "scalar": "instant",
+      "operation": "parse_canonical",
+      "input": "1970-01-01T00:00:00.000+00:00",
+      "expectedError": "invalid_instant"
+    },
+    {
+      "id": "instant.leap_second",
+      "scalar": "instant",
+      "operation": "parse_canonical",
+      "input": "2016-12-31T23:59:60.000Z",
+      "expectedError": "invalid_instant"
+    },
+    {
+      "id": "instant.invalid_calendar_date",
+      "scalar": "instant",
+      "operation": "parse_canonical",
+      "input": "2023-02-29T00:00:00.000Z",
+      "expectedError": "invalid_instant"
+    },
+    {
+      "id": "instant.year_zero",
+      "scalar": "instant",
+      "operation": "parse_canonical",
+      "input": "0000-01-01T00:00:00.000Z",
+      "expectedError": "invalid_instant"
+    },
+    {
+      "id": "instant.lowercase_z",
+      "scalar": "instant",
+      "operation": "parse_canonical",
+      "input": "1970-01-01T00:00:00.000z",
+      "expectedError": "invalid_instant"
+    },
+    {
+      "id": "instant.offset_bad_hour",
+      "scalar": "instant",
+      "operation": "normalize_offset",
+      "input": "1970-01-01T00:00:00.000+24:00",
+      "expectedError": "invalid_instant"
+    },
+    {
+      "id": "local_date.non_leap_day",
+      "scalar": "local_date",
+      "operation": "parse",
+      "input": "1900-02-29",
+      "expectedError": "invalid_local_date"
+    },
+    {
+      "id": "local_date.non_padded",
+      "scalar": "local_date",
+      "operation": "parse",
+      "input": "2026-8-3",
+      "expectedError": "invalid_local_date"
+    },
+    {
+      "id": "local_date.slashes",
+      "scalar": "local_date",
+      "operation": "parse",
+      "input": "2026/08/03",
+      "expectedError": "invalid_local_date"
+    },
+    {
+      "id": "local_date.year_zero",
+      "scalar": "local_date",
+      "operation": "parse",
+      "input": "0000-01-01",
+      "expectedError": "invalid_local_date"
+    },
+    {
+      "id": "local_time.end_of_day_alias",
+      "scalar": "local_time",
+      "operation": "parse",
+      "input": "24:00:00",
+      "expectedError": "invalid_local_time"
+    },
+    {
+      "id": "local_time.fractional_seconds",
+      "scalar": "local_time",
+      "operation": "parse",
+      "input": "12:00:00.000",
+      "expectedError": "invalid_local_time"
+    },
+    {
+      "id": "local_time.with_offset",
+      "scalar": "local_time",
+      "operation": "parse",
+      "input": "12:00:00+08:00",
+      "expectedError": "invalid_local_time"
+    },
+    {
+      "id": "local_time.non_padded",
+      "scalar": "local_time",
+      "operation": "parse",
+      "input": "1:02:03",
+      "expectedError": "invalid_local_time"
+    },
+    {
+      "id": "time_zone.numeric_offset",
+      "scalar": "time_zone_id",
+      "operation": "resolve",
+      "input": {
+        "value": "+08:00",
+        "resolver": {
+          "kind": "canonical"
+        }
+      },
+      "expectedError": "invalid_time_zone_id"
+    },
+    {
+      "id": "time_zone.abbreviation",
+      "scalar": "time_zone_id",
+      "operation": "resolve",
+      "input": {
+        "value": "CST",
+        "resolver": {
+          "kind": "canonical"
+        }
+      },
+      "expectedError": "invalid_time_zone_id"
+    },
+    {
+      "id": "time_zone.unknown_resolver_result",
+      "scalar": "time_zone_id",
+      "operation": "resolve",
+      "input": {
+        "value": "Mars/Olympus_Mons",
+        "resolver": {
+          "kind": "unknown"
+        }
+      },
+      "expectedError": "unknown_time_zone"
+    },
+    {
+      "id": "time_zone.alias_bad_target",
+      "scalar": "time_zone_id",
+      "operation": "resolve",
+      "input": {
+        "value": "US/Eastern",
+        "resolver": {
+          "kind": "alias",
+          "canonical": "CST"
+        }
+      },
+      "expectedError": "invalid_time_zone_id"
+    },
+    {
+      "id": "exact_decimal.leading_zero",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "01",
+      "expectedError": "invalid_exact_decimal"
+    },
+    {
+      "id": "exact_decimal.trailing_fraction_zero",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "1.230",
+      "expectedError": "invalid_exact_decimal"
+    },
+    {
+      "id": "exact_decimal.negative_zero",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "-0",
+      "expectedError": "invalid_exact_decimal"
+    },
+    {
+      "id": "exact_decimal.zero_fraction",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "0.000",
+      "expectedError": "invalid_exact_decimal"
+    },
+    {
+      "id": "exact_decimal.plus_sign",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "+1",
+      "expectedError": "invalid_exact_decimal"
+    },
+    {
+      "id": "exact_decimal.exponent",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "1e3",
+      "expectedError": "invalid_exact_decimal"
+    },
+    {
+      "id": "exact_decimal.four_fraction_digits",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "0.0001",
+      "expectedError": "invalid_exact_decimal"
+    },
+    {
+      "id": "exact_decimal.whitespace",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": " 1",
+      "expectedError": "invalid_exact_decimal"
+    },
+    {
+      "id": "exact_decimal.below_minimum",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "-1000000000000000",
+      "expectedError": "exact_decimal_out_of_range"
+    },
+    {
+      "id": "exact_decimal.long_malicious_input",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "1111111111111111111111111111111111111111111111111111111111111111",
+      "expectedError": "invalid_exact_decimal"
+    },
+    {
+      "id": "exact_decimal.scaled_leading_zero",
+      "scalar": "exact_decimal",
+      "operation": "parse_scaled",
+      "input": "01",
+      "expectedError": "invalid_scaled_integer"
+    },
+    {
+      "id": "exact_decimal.scaled_negative_zero",
+      "scalar": "exact_decimal",
+      "operation": "parse_scaled",
+      "input": "-0",
+      "expectedError": "invalid_scaled_integer"
+    },
+    {
+      "id": "exact_decimal.scaled_above_maximum",
+      "scalar": "exact_decimal",
+      "operation": "parse_scaled",
+      "input": "1000000000000000000",
+      "expectedError": "invalid_scaled_integer"
+    },
+    {
+      "id": "sort_key.short",
+      "scalar": "sort_key",
+      "operation": "parse",
+      "input": "1",
+      "expectedError": "invalid_sort_key"
+    },
+    {
+      "id": "sort_key.uppercase",
+      "scalar": "sort_key",
+      "operation": "parse",
+      "input": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+      "expectedError": "invalid_sort_key"
+    },
+    {
+      "id": "sort_key.prefix",
+      "scalar": "sort_key",
+      "operation": "parse",
+      "input": "0x00000000000000000000000000000000",
+      "expectedError": "invalid_sort_key"
+    },
+    {
+      "id": "sort_key.reversed_midpoint",
+      "scalar": "sort_key",
+      "operation": "midpoint",
+      "input": {
+        "left": "00000000000000000000000000000002",
+        "right": "00000000000000000000000000000001"
+      },
+      "expectedError": "invalid_sort_key"
+    },
+    {
+      "id": "revision.zero",
+      "scalar": "revision",
+      "operation": "parse",
+      "input": 0,
+      "expectedError": "invalid_revision"
+    },
+    {
+      "id": "revision.fraction",
+      "scalar": "revision",
+      "operation": "parse",
+      "input": 1.5,
+      "expectedError": "invalid_revision"
+    },
+    {
+      "id": "revision.string",
+      "scalar": "revision",
+      "operation": "parse",
+      "input": "1",
+      "expectedError": "invalid_revision"
+    },
+    {
+      "id": "revision.above_maximum",
+      "scalar": "revision",
+      "operation": "parse",
+      "input": 4294967296,
+      "expectedError": "invalid_revision"
+    },
+    {
+      "id": "long_counter.negative",
+      "scalar": "long_counter",
+      "operation": "parse",
+      "input": "-1",
+      "expectedError": "invalid_long_counter"
+    },
+    {
+      "id": "long_counter.leading_zero",
+      "scalar": "long_counter",
+      "operation": "parse",
+      "input": "01",
+      "expectedError": "invalid_long_counter"
+    },
+    {
+      "id": "long_counter.plus_sign",
+      "scalar": "long_counter",
+      "operation": "parse",
+      "input": "+1",
+      "expectedError": "invalid_long_counter"
+    },
+    {
+      "id": "long_counter.decimal",
+      "scalar": "long_counter",
+      "operation": "parse",
+      "input": "1.0",
+      "expectedError": "invalid_long_counter"
+    },
+    {
+      "id": "long_counter.exponent",
+      "scalar": "long_counter",
+      "operation": "parse",
+      "input": "1e3",
+      "expectedError": "invalid_long_counter"
+    },
+    {
+      "id": "long_counter.json_number",
+      "scalar": "long_counter",
+      "operation": "parse",
+      "input": 9007199254740992,
+      "expectedError": "invalid_long_counter"
+    },
+    {
+      "id": "long_counter.above_maximum",
+      "scalar": "long_counter",
+      "operation": "parse",
+      "input": "9223372036854775808",
+      "expectedError": "invalid_long_counter"
+    },
+    {
+      "id": "json_policy.string_boolean",
+      "scalar": "json_policy",
+      "operation": "boolean",
+      "input": "true",
+      "expectedError": "invalid_json_scalar"
+    },
+    {
+      "id": "json_policy.numeric_boolean",
+      "scalar": "json_policy",
+      "operation": "boolean",
+      "input": 1,
+      "expectedError": "invalid_json_scalar"
+    },
+    {
+      "id": "json_policy.uppercase_enum",
+      "scalar": "json_policy",
+      "operation": "enum",
+      "input": "IN_PROGRESS",
+      "expectedError": "invalid_json_scalar"
+    },
+    {
+      "id": "json_policy.hyphenated_enum",
+      "scalar": "json_policy",
+      "operation": "enum",
+      "input": "in-progress",
+      "expectedError": "invalid_json_scalar"
+    },
+    {
+      "id": "json_policy.null_not_allowed",
+      "scalar": "json_policy",
+      "operation": "presence",
+      "input": {
+        "object": {
+          "note": null
+        },
+        "field": "note",
+        "nullable": false,
+        "optional": false
+      },
+      "expectedError": "invalid_json_scalar"
+    },
+    {
+      "id": "json_policy.unpaired_surrogate",
+      "scalar": "json_policy",
+      "operation": "utf8",
+      "input": "\ud800",
+      "expectedError": "invalid_json_scalar"
+    }
+  ]
+}
