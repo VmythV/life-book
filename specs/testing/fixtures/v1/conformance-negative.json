@@ -1,0 +1,240 @@
+{
+  "fixtureVersion": 1,
+  "kind": "negative",
+  "schema": "conformance",
+  "baseIndex": {
+    "conformanceIndexVersion": 1,
+    "generatedBy": {
+      "kind": "ci",
+      "provider": "github_actions",
+      "runId": "123456789",
+      "runAttempt": 1,
+      "workflowRef": "life-book/life-book/.github/workflows/conformance.yml@refs/heads/main"
+    },
+    "generatedAt": "2026-08-13T08:00:00.000Z",
+    "repository": "life-book/life-book",
+    "git": {
+      "sha": "1111111111111111111111111111111111111111",
+      "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "ref": "refs/heads/main",
+      "dirty": false
+    },
+    "toolchain": {
+      "node": "24.13.0",
+      "pnpm": "11.21.0",
+      "lockfileSha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "suites": [
+      {
+        "suiteId": "scalar_v1",
+        "scope": "TypeScript scalar v1 implementation conformance",
+        "contracts": [
+          {
+            "path": "specs/scalars/v1.md",
+            "identity": "scalarEncodingVersion=1",
+            "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+          }
+        ],
+        "oracle": {
+          "manifestPath": "specs/scalars/fixtures/v1/manifest.json",
+          "manifestSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "packageSha256": "6666666666666666666666666666666666666666666666666666666666666666"
+        },
+        "requiredTargetIds": ["typescript_hermes_android"],
+        "targets": [
+          {
+            "targetId": "typescript_hermes_android",
+            "required": true,
+            "implementation": {
+              "component": "life-book.scalar",
+              "language": "typescript",
+              "version": "1.0.0",
+              "artifactSha256": "7777777777777777777777777777777777777777777777777777777777777777"
+            },
+            "platform": {
+              "os": "android",
+              "osVersion": "16",
+              "architecture": "arm64",
+              "runtime": "hermes",
+              "runtimeVersion": "1.0.0",
+              "deviceModel": "controlled-test-device"
+            },
+            "command": "corepack pnpm conformance:scalar:android",
+            "startedAt": "2026-08-13T07:55:00.000Z",
+            "completedAt": "2026-08-13T07:59:00.000Z",
+            "status": "pass",
+            "assertions": {
+              "passed": 118,
+              "failed": 0,
+              "total": 118
+            },
+            "artifactUri": "https://github.com/life-book/life-book/actions/runs/123456789/artifacts/987654321#8888888888888888888888888888888888888888888888888888888888888888"
+          }
+        ],
+        "status": "verified"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "conformance.handwritten_generator",
+      "mutation": {
+        "operation": "set",
+        "path": ["generatedBy", "kind"],
+        "value": "manual"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "const"
+    },
+    {
+      "id": "conformance.dirty_tree",
+      "mutation": {
+        "operation": "set",
+        "path": ["git", "dirty"],
+        "value": true
+      },
+      "expectedValid": false,
+      "expectedKeyword": "const"
+    },
+    {
+      "id": "conformance.mutable_artifact_uri",
+      "mutation": {
+        "operation": "set",
+        "path": ["suites", 0, "targets", 0, "artifactUri"],
+        "value": "https://example.com/latest.zip"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "pattern"
+    },
+    {
+      "id": "conformance.failed_assertion_marked_pass",
+      "mutation": {
+        "operation": "set",
+        "path": ["suites", 0, "targets", 0, "assertions", "failed"],
+        "value": 1
+      },
+      "expectedValid": false,
+      "expectedKeyword": "aggregate_invariant"
+    },
+    {
+      "id": "conformance.missing_required_target",
+      "mutation": {
+        "operation": "set",
+        "path": ["suites", 0, "requiredTargetIds", 0],
+        "value": "kotlin_android"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "aggregate_invariant"
+    },
+    {
+      "id": "conformance.verified_with_blocked_target",
+      "mutation": {
+        "operation": "set",
+        "path": ["suites", 0, "targets", 0, "status"],
+        "value": "blocked"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "aggregate_invariant"
+    },
+    {
+      "id": "conformance.duplicate_suite_id",
+      "mutation": {
+        "operation": "set",
+        "path": ["suites", 1],
+        "value": {
+          "suiteId": "scalar_v1",
+          "scope": "Duplicate suite must be rejected",
+          "contracts": [
+            {
+              "path": "specs/scalars/v1.md",
+              "identity": "scalarEncodingVersion=1",
+              "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+            }
+          ],
+          "oracle": {
+            "manifestPath": "specs/scalars/fixtures/v1/manifest.json",
+            "manifestSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+            "packageSha256": "6666666666666666666666666666666666666666666666666666666666666666"
+          },
+          "requiredTargetIds": ["typescript_hermes_android"],
+          "targets": [
+            {
+              "targetId": "typescript_hermes_android",
+              "required": true,
+              "implementation": {
+                "component": "life-book.scalar",
+                "language": "typescript",
+                "version": "1.0.0",
+                "artifactSha256": "7777777777777777777777777777777777777777777777777777777777777777"
+              },
+              "platform": {
+                "os": "android",
+                "osVersion": "16",
+                "architecture": "arm64",
+                "runtime": "hermes",
+                "runtimeVersion": "1.0.0"
+              },
+              "command": "corepack pnpm conformance:scalar:android",
+              "startedAt": "2026-08-13T07:55:00.000Z",
+              "completedAt": "2026-08-13T07:59:00.000Z",
+              "status": "pass",
+              "assertions": {
+                "passed": 118,
+                "failed": 0,
+                "total": 118
+              },
+              "artifactUri": "https://github.com/life-book/life-book/actions/runs/123456789/artifacts/987654321#8888888888888888888888888888888888888888888888888888888888888888"
+            }
+          ],
+          "status": "verified"
+        }
+      },
+      "expectedValid": false,
+      "expectedKeyword": "duplicate_suite_id"
+    },
+    {
+      "id": "conformance.invalid_generated_calendar_date",
+      "mutation": {
+        "operation": "set",
+        "path": ["generatedAt"],
+        "value": "2026-02-31T08:00:00.000Z"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "calendar_validity"
+    },
+    {
+      "id": "conformance.completed_before_started",
+      "mutation": {
+        "operation": "set",
+        "path": ["suites", 0, "targets", 0, "completedAt"],
+        "value": "2026-08-13T07:54:59.999Z"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "aggregate_invariant"
+    },
+    {
+      "id": "conformance.required_flag_hidden",
+      "mutation": {
+        "operation": "set",
+        "path": ["suites", 0, "targets", 0, "required"],
+        "value": false
+      },
+      "expectedValid": false,
+      "expectedKeyword": "aggregate_invariant"
+    },
+    {
+      "id": "conformance.duplicate_contract_path",
+      "mutation": {
+        "operation": "set",
+        "path": ["suites", 0, "contracts", 1],
+        "value": {
+          "path": "specs/scalars/v1.md",
+          "identity": "scalarEncodingVersion=1",
+          "sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+        }
+      },
+      "expectedValid": false,
+      "expectedKeyword": "duplicate_contract_path"
+    }
+  ]
+}
