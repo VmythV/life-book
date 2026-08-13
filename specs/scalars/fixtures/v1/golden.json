@@ -1,0 +1,279 @@
+{
+  "fixtureVersion": 1,
+  "scalarEncodingVersion": 1,
+  "kind": "golden",
+  "cases": [
+    {
+      "id": "entity_id.canonical_uuid_v4",
+      "scalar": "entity_id",
+      "operation": "parse",
+      "input": "550e8400-e29b-41d4-a716-446655440000",
+      "expected": "550e8400-e29b-41d4-a716-446655440000"
+    },
+    {
+      "id": "instant.unix_epoch",
+      "scalar": "instant",
+      "operation": "parse_canonical",
+      "input": "1970-01-01T00:00:00.000Z",
+      "expected": {
+        "epochMilliseconds": 0,
+        "canonical": "1970-01-01T00:00:00.000Z"
+      }
+    },
+    {
+      "id": "instant.gregorian_leap_day",
+      "scalar": "instant",
+      "operation": "parse_canonical",
+      "input": "2000-02-29T12:34:56.789Z",
+      "expected": {
+        "epochMilliseconds": 951827696789,
+        "canonical": "2000-02-29T12:34:56.789Z"
+      }
+    },
+    {
+      "id": "instant.explicit_offset_normalizer",
+      "scalar": "instant",
+      "operation": "normalize_offset",
+      "input": "2026-08-13T16:00:00.000+08:00",
+      "expected": {
+        "epochMilliseconds": 1786608000000,
+        "canonical": "2026-08-13T08:00:00.000Z"
+      }
+    },
+    {
+      "id": "local_date.leap_day",
+      "scalar": "local_date",
+      "operation": "parse",
+      "input": "2024-02-29",
+      "expected": "2024-02-29"
+    },
+    {
+      "id": "local_date.non_leap_century",
+      "scalar": "local_date",
+      "operation": "parse",
+      "input": "1900-03-01",
+      "expected": "1900-03-01"
+    },
+    {
+      "id": "local_time.midnight",
+      "scalar": "local_time",
+      "operation": "parse",
+      "input": "00:00:00",
+      "expected": {
+        "seconds": 0,
+        "canonical": "00:00:00"
+      }
+    },
+    {
+      "id": "local_time.second_precision",
+      "scalar": "local_time",
+      "operation": "parse",
+      "input": "12:34:56",
+      "expected": {
+        "seconds": 45296,
+        "canonical": "12:34:56"
+      }
+    },
+    {
+      "id": "time_zone.utc_canonical",
+      "scalar": "time_zone_id",
+      "operation": "resolve",
+      "input": {
+        "value": "UTC",
+        "resolver": {
+          "kind": "canonical"
+        }
+      },
+      "expected": "UTC"
+    },
+    {
+      "id": "time_zone.iana_canonical",
+      "scalar": "time_zone_id",
+      "operation": "resolve",
+      "input": {
+        "value": "Asia/Shanghai",
+        "resolver": {
+          "kind": "canonical"
+        }
+      },
+      "expected": "Asia/Shanghai"
+    },
+    {
+      "id": "time_zone.resolver_alias",
+      "scalar": "time_zone_id",
+      "operation": "resolve",
+      "input": {
+        "value": "US/Eastern",
+        "resolver": {
+          "kind": "alias",
+          "canonical": "America/New_York"
+        }
+      },
+      "expected": "America/New_York"
+    },
+    {
+      "id": "exact_decimal.zero",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "0",
+      "expected": {
+        "scaled": "0",
+        "canonical": "0"
+      }
+    },
+    {
+      "id": "exact_decimal.integer",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "12",
+      "expected": {
+        "scaled": "12000",
+        "canonical": "12"
+      }
+    },
+    {
+      "id": "exact_decimal.negative_fraction",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "-0.125",
+      "expected": {
+        "scaled": "-125",
+        "canonical": "-0.125"
+      }
+    },
+    {
+      "id": "exact_decimal.short_fraction",
+      "scalar": "exact_decimal",
+      "operation": "parse_display",
+      "input": "1.25",
+      "expected": {
+        "scaled": "1250",
+        "canonical": "1.25"
+      }
+    },
+    {
+      "id": "exact_decimal.format_scaled_text",
+      "scalar": "exact_decimal",
+      "operation": "format_scaled",
+      "input": "1250",
+      "expected": "1.25"
+    },
+    {
+      "id": "exact_decimal.sqlite_scaled_text",
+      "scalar": "exact_decimal",
+      "operation": "parse_scaled",
+      "input": "-125",
+      "expected": "-125"
+    },
+    {
+      "id": "sort_key.parse_assignable",
+      "scalar": "sort_key",
+      "operation": "parse",
+      "input": "80000000000000000000000000000000",
+      "expected": {
+        "decimal": "170141183460469231731687303715884105728",
+        "assignable": true
+      }
+    },
+    {
+      "id": "sort_key.full_range_midpoint",
+      "scalar": "sort_key",
+      "operation": "midpoint",
+      "input": {
+        "left": "00000000000000000000000000000000",
+        "right": "ffffffffffffffffffffffffffffffff"
+      },
+      "expected": "7fffffffffffffffffffffffffffffff"
+    },
+    {
+      "id": "sort_key.two_item_rebalance",
+      "scalar": "sort_key",
+      "operation": "rebalance",
+      "input": [
+        {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "sortKey": "90000000000000000000000000000000"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "sortKey": "10000000000000000000000000000000"
+        }
+      ],
+      "expected": [
+        {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "sortKey": "55555555555555555555555555555555"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "sortKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    },
+    {
+      "id": "revision.parse",
+      "scalar": "revision",
+      "operation": "parse",
+      "input": 42,
+      "expected": 42
+    },
+    {
+      "id": "revision.checked_increment",
+      "scalar": "revision",
+      "operation": "increment",
+      "input": 42,
+      "expected": 43
+    },
+    {
+      "id": "long_counter.zero",
+      "scalar": "long_counter",
+      "operation": "parse",
+      "input": "0",
+      "expected": "0"
+    },
+    {
+      "id": "long_counter.checked_increment",
+      "scalar": "long_counter",
+      "operation": "increment",
+      "input": "42",
+      "expected": "43"
+    },
+    {
+      "id": "json_policy.strict_boolean",
+      "scalar": "json_policy",
+      "operation": "boolean",
+      "input": true,
+      "expected": true
+    },
+    {
+      "id": "json_policy.snake_case_enum",
+      "scalar": "json_policy",
+      "operation": "enum",
+      "input": "in_progress",
+      "expected": "in_progress"
+    },
+    {
+      "id": "json_policy.explicit_nullable",
+      "scalar": "json_policy",
+      "operation": "presence",
+      "input": {
+        "object": {
+          "note": null
+        },
+        "field": "note",
+        "nullable": true,
+        "optional": false
+      },
+      "expected": {
+        "state": "null"
+      }
+    },
+    {
+      "id": "json_policy.utf8_roundtrip",
+      "scalar": "json_policy",
+      "operation": "utf8",
+      "input": "生活有谱 👨‍👩‍👧‍👦 é",
+      "expected": "生活有谱 👨‍👩‍👧‍👦 é"
+    }
+  ]
+}
