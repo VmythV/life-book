@@ -1,0 +1,35 @@
+{
+  "name": "@life-book/android-capability-spike",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./index.ts",
+  "expo": {
+    "autolinking": {
+      "nativeModulesDir": "./modules"
+    }
+  },
+  "scripts": {
+    "prebuild": "expo prebuild --platform android --no-install",
+    "dependencies:check": "expo install --check",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "expo": "57.0.12",
+    "expo-build-properties": "57.0.10",
+    "expo-crypto": "57.0.1",
+    "expo-document-picker": "57.0.1",
+    "expo-file-system": "57.0.2",
+    "expo-local-authentication": "57.0.2",
+    "expo-notifications": "57.0.10",
+    "expo-secure-store": "57.0.1",
+    "expo-sharing": "57.0.11",
+    "expo-sqlite": "57.0.1",
+    "expo-task-manager": "57.0.9",
+    "react": "19.2.3",
+    "react-native": "0.86.2"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.10",
+    "typescript": "6.0.3"
+  }
+}
