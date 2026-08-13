@@ -1,0 +1,31 @@
+{
+  "name": "@life-book/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./index.ts",
+  "scripts": {
+    "start": "expo start --dev-client --offline",
+    "prebuild": "expo prebuild --no-install",
+    "build:android": "node ../../tools/mobile/run-scaffold-build.mjs",
+    "dependencies:check": "expo install --check",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@life-book/ui": "workspace:*",
+    "expo": "57.0.12",
+    "expo-build-properties": "57.0.10",
+    "expo-dev-client": "57.0.11",
+    "expo-status-bar": "57.0.1",
+    "expo-system-ui": "57.0.2",
+    "react": "19.2.3",
+    "react-native": "0.86.2",
+    "react-native-safe-area-context": "5.7.0"
+  },
+  "devDependencies": {
+    "@life-book/test-support": "workspace:*",
+    "@types/node": "24.13.3",
+    "@types/react": "19.2.10",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}
