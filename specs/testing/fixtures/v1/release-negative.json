@@ -1,0 +1,184 @@
+{
+  "fixtureVersion": 1,
+  "kind": "negative",
+  "schema": "release",
+  "baseIndex": {
+    "releaseEvidenceIndexVersion": 1,
+    "generatedBy": {
+      "kind": "ci",
+      "provider": "github_actions",
+      "runId": "223456789",
+      "runAttempt": 1,
+      "workflowRef": "life-book/life-book/.github/workflows/release.yml@refs/tags/v1.0.0-rc.1"
+    },
+    "generatedAt": "2026-08-13T10:00:00.000Z",
+    "repository": "life-book/life-book",
+    "git": {
+      "sha": "1111111111111111111111111111111111111111",
+      "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "ref": "refs/tags/v1.0.0-rc.1",
+      "dirty": false
+    },
+    "candidate": {
+      "candidateId": "android_1.0.0_rc.1",
+      "version": "1.0.0-rc.1",
+      "platform": "android",
+      "applicationId": "dev.lifebook.mobile",
+      "buildVariant": "release_candidate",
+      "debuggable": false,
+      "signed": true,
+      "artifactSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "signingCertificateSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "artifactUri": "https://github.com/life-book/life-book/releases/download/v1.0.0-rc.1/life-book.apk#3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "conformance": {
+      "indexVersion": 1,
+      "gitSha": "1111111111111111111111111111111111111111",
+      "indexSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "artifactUri": "https://github.com/life-book/life-book/actions/runs/123456789/artifacts/111111111#5555555555555555555555555555555555555555555555555555555555555555",
+      "status": "verified"
+    },
+    "checks": [
+      {
+        "checkId": "android_signing",
+        "category": "signing",
+        "required": true,
+        "environment": {
+          "kind": "ci",
+          "identity": "github-actions-release-run-223456789"
+        },
+        "command": "corepack pnpm release:verify:android",
+        "startedAt": "2026-08-13T09:50:00.000Z",
+        "completedAt": "2026-08-13T09:59:00.000Z",
+        "status": "pass",
+        "artifactUri": "https://github.com/life-book/life-book/actions/runs/223456789/artifacts/222222222#6666666666666666666666666666666666666666666666666666666666666666"
+      }
+    ],
+    "status": "verified"
+  },
+  "cases": [
+    {
+      "id": "release.debuggable_candidate",
+      "mutation": {
+        "operation": "set",
+        "path": ["candidate", "debuggable"],
+        "value": true
+      },
+      "expectedValid": false,
+      "expectedKeyword": "const"
+    },
+    {
+      "id": "release.unsigned_candidate",
+      "mutation": {
+        "operation": "set",
+        "path": ["candidate", "signed"],
+        "value": false
+      },
+      "expectedValid": false,
+      "expectedKeyword": "const"
+    },
+    {
+      "id": "release.debug_variant",
+      "mutation": {
+        "operation": "set",
+        "path": ["candidate", "buildVariant"],
+        "value": "debug"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "enum"
+    },
+    {
+      "id": "release.conformance_wrong_git",
+      "mutation": {
+        "operation": "set",
+        "path": ["conformance", "gitSha"],
+        "value": "9999999999999999999999999999999999999999"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "aggregate_invariant"
+    },
+    {
+      "id": "release.artifact_digest_mismatch",
+      "mutation": {
+        "operation": "set",
+        "path": ["candidate", "artifactUri"],
+        "value": "https://github.com/life-book/life-book/releases/download/v1.0.0-rc.1/life-book.apk#9999999999999999999999999999999999999999999999999999999999999999"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "aggregate_invariant"
+    },
+    {
+      "id": "release.required_check_failed",
+      "mutation": {
+        "operation": "set",
+        "path": ["checks", 0, "status"],
+        "value": "fail"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "aggregate_invariant"
+    },
+    {
+      "id": "release.duplicate_check_id",
+      "mutation": {
+        "operation": "set",
+        "path": ["checks", 1],
+        "value": {
+          "checkId": "android_signing",
+          "category": "rollout_rollback",
+          "required": true,
+          "environment": {
+            "kind": "ci",
+            "identity": "github-actions-release-run-223456789"
+          },
+          "command": "corepack pnpm release:verify:rollback",
+          "startedAt": "2026-08-13T09:50:00.000Z",
+          "completedAt": "2026-08-13T09:59:00.000Z",
+          "status": "pass",
+          "artifactUri": "https://github.com/life-book/life-book/actions/runs/223456789/artifacts/333333333#7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      },
+      "expectedValid": false,
+      "expectedKeyword": "duplicate_check_id"
+    },
+    {
+      "id": "release.invalid_generated_calendar_date",
+      "mutation": {
+        "operation": "set",
+        "path": ["generatedAt"],
+        "value": "2026-02-31T10:00:00.000Z"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "calendar_validity"
+    },
+    {
+      "id": "release.completed_before_started",
+      "mutation": {
+        "operation": "set",
+        "path": ["checks", 0, "completedAt"],
+        "value": "2026-08-13T09:49:59.999Z"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "aggregate_invariant"
+    },
+    {
+      "id": "release.conformance_uri_digest_mismatch",
+      "mutation": {
+        "operation": "set",
+        "path": ["conformance", "artifactUri"],
+        "value": "https://github.com/life-book/life-book/actions/runs/123456789/artifacts/111111111#9999999999999999999999999999999999999999999999999999999999999999"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "aggregate_invariant"
+    },
+    {
+      "id": "release.false_verified_aggregate",
+      "mutation": {
+        "operation": "set",
+        "path": ["status"],
+        "value": "blocked"
+      },
+      "expectedValid": false,
+      "expectedKeyword": "aggregate_invariant"
+    }
+  ]
+}
