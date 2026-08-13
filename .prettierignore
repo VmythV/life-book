@@ -1,0 +1,5 @@
+**/.expo/**
+**/android/**
+**/coverage/**
+**/node_modules/**
+packages/ui/src/generated/**
