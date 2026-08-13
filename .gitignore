@@ -1,0 +1,12 @@
+.DS_Store
+.expo/
+node_modules/
+coverage/
+dist/
+apps/mobile/android/
+apps/android-capability-spike/android/
+apps/android-capability-spike/modules/*/android/build/
+*.log
+.env
+.env.*
+!.env.example
