@@ -1,0 +1,106 @@
+{
+  "oracleManifestVersion": 1,
+  "oracleId": "testing_infrastructure_v1",
+  "oracleVersion": "1.0.0",
+  "contracts": [
+    {
+      "path": "specs/testing/oracle-manifest-v1.schema.json",
+      "identity": {
+        "name": "oracleManifestVersion",
+        "value": 1
+      },
+      "sha256": "41602689dc5c4df12fd1323521f2e120b09111f0c3d675ecec2aca65a8a87c8a"
+    },
+    {
+      "path": "specs/testing/conformance-index-v1.schema.json",
+      "identity": {
+        "name": "conformanceIndexVersion",
+        "value": 1
+      },
+      "sha256": "e84ec97562aba2d37432a2e012a397debac379b665edc07371ec1e960732ab4a"
+    },
+    {
+      "path": "specs/testing/release-evidence-index-v1.schema.json",
+      "identity": {
+        "name": "releaseEvidenceIndexVersion",
+        "value": 1
+      },
+      "sha256": "0b01b90739fe6714cc0a8151f203254febfb6c175e35fee66eff198c2952df65"
+    }
+  ],
+  "generator": {
+    "name": "independent-testing-infrastructure-oracle",
+    "version": "1.0.0",
+    "implementationPath": "tools/oracles/check-testing-v1.mjs",
+    "independence": "Hand-authored mutations and independent aggregate checks validate the manifest and evidence schemas without generating product implementation or release evidence."
+  },
+  "selfCheck": {
+    "command": "corepack pnpm oracle:testing:check",
+    "expectedExitCode": 0
+  },
+  "fixtures": [
+    {
+      "path": "golden.json",
+      "sha256": "561f0fc217324ac62310bf8d3f913da7d32ae76cfb5b211a337985c8291310fd",
+      "kind": "golden",
+      "expectation": {
+        "mode": "all_accept",
+        "caseCount": 1
+      }
+    },
+    {
+      "path": "boundary.json",
+      "sha256": "dbb7e8d84f3b23ea7a5ad401e864bf7c44e58734aa8252d8e0c2ebff4a7328d3",
+      "kind": "boundary",
+      "expectation": {
+        "mode": "case_defined",
+        "caseCount": 4
+      }
+    },
+    {
+      "path": "negative.json",
+      "sha256": "239902bc6bf3517418b1f6e24f6c175ddebeed211837b91a8a01e2ed59ff76c5",
+      "kind": "negative",
+      "expectation": {
+        "mode": "all_reject",
+        "caseCount": 12
+      }
+    },
+    {
+      "path": "conformance-golden.json",
+      "sha256": "d089ba2010d9ba9c982350478af16875a9d12ba48becddd67dda78c4cbddba1f",
+      "kind": "golden",
+      "expectation": {
+        "mode": "all_accept",
+        "caseCount": 1
+      }
+    },
+    {
+      "path": "conformance-negative.json",
+      "sha256": "62097c3bf22602015649ff5d4b08205f8742b0ccd51de657f437883bac395706",
+      "kind": "negative",
+      "expectation": {
+        "mode": "all_reject",
+        "caseCount": 11
+      }
+    },
+    {
+      "path": "release-golden.json",
+      "sha256": "657fff144d8c16f9994165e63daf5c2ce22598cff238b849a3b42fe16305f891",
+      "kind": "golden",
+      "expectation": {
+        "mode": "all_accept",
+        "caseCount": 1
+      }
+    },
+    {
+      "path": "release-negative.json",
+      "sha256": "21c6b5110db80afd9ac18e1c2a193f4ebab0873c54c80964015d24ca17dc4ccc",
+      "kind": "negative",
+      "expectation": {
+        "mode": "all_reject",
+        "caseCount": 11
+      }
+    }
+  ]
+}
