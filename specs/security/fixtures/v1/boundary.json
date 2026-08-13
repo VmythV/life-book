@@ -1,0 +1,214 @@
+{
+  "fixtureVersion": 1,
+  "securityContractVersion": 1,
+  "kind": "boundary",
+  "cases": [
+    {
+      "id": "security.bootstrap_initialized_phase",
+      "operation": "validate_bootstrap_inline",
+      "input": {
+        "formatVersion": 1,
+        "bootstrapSequence": "2",
+        "installationIncarnationId": "00000000-0000-4000-8000-000000000002",
+        "installationId": "00000000-0000-4000-8000-000000000001",
+        "incarnationBootstrapOperationId": "00000000-0000-4000-8000-000000000003",
+        "stateOperationId": null,
+        "activeOperationId": "00000000-0000-4000-8000-000000000004",
+        "notificationDatasetEpoch": "0",
+        "phase": "initialized",
+        "installPresenceRecordDigest": "00670c1e73e8696900d9178e2ba954036a8b621910c70615c154ad2178d22d34",
+        "candidateGenerationId": null,
+        "initializedGenerationId": "00000000-0000-4000-8000-000000000005",
+        "initializedControlSequence": "1",
+        "activationOpenReceiptDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "appBuildId": "android-0.0.0-1",
+        "createdAt": "2026-08-13T08:00:00.000Z"
+      },
+      "expected": "valid"
+    },
+    {
+      "id": "security.bootstrap_clearing_phase",
+      "operation": "validate_bootstrap_inline",
+      "input": {
+        "formatVersion": 1,
+        "bootstrapSequence": "3",
+        "installationIncarnationId": "00000000-0000-4000-8000-000000000002",
+        "installationId": "00000000-0000-4000-8000-000000000001",
+        "incarnationBootstrapOperationId": "00000000-0000-4000-8000-000000000003",
+        "stateOperationId": "00000000-0000-4000-8000-000000000007",
+        "activeOperationId": "00000000-0000-4000-8000-000000000004",
+        "notificationDatasetEpoch": "0",
+        "phase": "clearing",
+        "installPresenceRecordDigest": "00670c1e73e8696900d9178e2ba954036a8b621910c70615c154ad2178d22d34",
+        "candidateGenerationId": null,
+        "initializedGenerationId": "00000000-0000-4000-8000-000000000005",
+        "initializedControlSequence": "1",
+        "activationOpenReceiptDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "appBuildId": "android-0.0.0-1",
+        "createdAt": "2026-08-13T08:00:00.000Z"
+      },
+      "expected": "valid"
+    },
+    {
+      "id": "security.initializing_candidate_bound",
+      "operation": "validate_bootstrap_inline",
+      "input": {
+        "formatVersion": 1,
+        "bootstrapSequence": "1",
+        "installationIncarnationId": "00000000-0000-4000-8000-000000000002",
+        "installationId": "00000000-0000-4000-8000-000000000001",
+        "incarnationBootstrapOperationId": "00000000-0000-4000-8000-000000000003",
+        "stateOperationId": "00000000-0000-4000-8000-000000000003",
+        "activeOperationId": null,
+        "notificationDatasetEpoch": "0",
+        "phase": "initializing",
+        "installPresenceRecordDigest": "00670c1e73e8696900d9178e2ba954036a8b621910c70615c154ad2178d22d34",
+        "candidateGenerationId": "00000000-0000-4000-8000-000000000006",
+        "initializedGenerationId": null,
+        "initializedControlSequence": null,
+        "activationOpenReceiptDigest": null,
+        "appBuildId": "android-0.0.0-1",
+        "createdAt": "2026-08-13T08:00:00.000Z"
+      },
+      "expected": "valid"
+    },
+    {
+      "id": "security.long_counter_max_stable",
+      "operation": "headroom",
+      "input": {
+        "current": "9223372036854775807",
+        "required": 0
+      },
+      "expected": true
+    },
+    {
+      "id": "security.long_counter_max_transition_blocked",
+      "operation": "headroom",
+      "input": {
+        "current": "9223372036854775807",
+        "required": 1
+      },
+      "expectedError": "anchor_sequence_exhausted"
+    },
+    {
+      "id": "security.clear_exact_headroom",
+      "operation": "clear_headroom",
+      "input": {
+        "presenceSequence": "9223372036854775806",
+        "bootstrapSequence": "9223372036854775803"
+      },
+      "expected": true
+    },
+    {
+      "id": "security.clear_insufficient_bootstrap_headroom",
+      "operation": "clear_headroom",
+      "input": {
+        "presenceSequence": "9223372036854775806",
+        "bootstrapSequence": "9223372036854775804"
+      },
+      "expectedError": "anchor_sequence_exhausted"
+    },
+    {
+      "id": "security.one_invalid_one_valid_pair",
+      "operation": "select_pair",
+      "input": {
+        "presenceCandidates": [
+          {
+            "sequence": "0",
+            "digest": "00670c1e73e8696900d9178e2ba954036a8b621910c70615c154ad2178d22d34",
+            "valid": true,
+            "identity": "realm_a"
+          },
+          {
+            "sequence": null,
+            "digest": null,
+            "valid": false,
+            "identity": null
+          }
+        ],
+        "bootstrapCandidates": [
+          {
+            "sequence": "2",
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "valid": true,
+            "identity": "realm_a",
+            "presenceDigest": "00670c1e73e8696900d9178e2ba954036a8b621910c70615c154ad2178d22d34",
+            "phase": "initialized"
+          },
+          {
+            "sequence": null,
+            "digest": null,
+            "valid": false,
+            "identity": null,
+            "presenceDigest": null,
+            "phase": null
+          }
+        ]
+      },
+      "expected": {
+        "classification": "initialized",
+        "identity": "realm_a",
+        "bootstrapSequence": "2"
+      }
+    },
+    {
+      "id": "security.clear_pending_presence_keeps_source",
+      "operation": "select_clear_pair",
+      "input": {
+        "journalPhase": "target_presence_written",
+        "source": {
+          "identity": "realm_a",
+          "phase": "clearing",
+          "compatible": true
+        },
+        "target": {
+          "identity": "realm_b",
+          "presenceDurable": true,
+          "bootstrapDurable": false,
+          "compatible": false
+        }
+      },
+      "expected": "realm_a"
+    },
+    {
+      "id": "security.clear_complete_target_switches",
+      "operation": "select_clear_pair",
+      "input": {
+        "journalPhase": "target_bootstrap_written",
+        "source": {
+          "identity": "realm_a",
+          "phase": "clearing",
+          "compatible": true
+        },
+        "target": {
+          "identity": "realm_b",
+          "presenceDurable": true,
+          "bootstrapDurable": true,
+          "compatible": true
+        }
+      },
+      "expected": "realm_b"
+    },
+    {
+      "id": "security.reinstall_orphan_aliases",
+      "operation": "classify",
+      "input": {
+        "strictAllAbsent": true,
+        "orphanAliases": true,
+        "keyAvailable": true
+      },
+      "expected": "reinstall_orphans"
+    },
+    {
+      "id": "security.key_unavailable_with_artifacts",
+      "operation": "classify",
+      "input": {
+        "strictAllAbsent": false,
+        "orphanAliases": false,
+        "keyAvailable": false,
+        "artifactsPresent": true
+      },
+      "expected": "key_unavailable"
+    }
+  ]
+}
