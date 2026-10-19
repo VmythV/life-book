@@ -4,14 +4,15 @@
   "private": true,
   "main": "./index.ts",
   "scripts": {
-    "start": "expo start --dev-client --offline",
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "prebuild": "expo prebuild --no-install",
-    "build:android": "node ../../tools/mobile/run-scaffold-build.mjs",
     "dependencies:check": "expo install --check",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@life-book/ui": "workspace:*",
+    "@life-book/design-tokens": "workspace:*",
     "expo": "57.0.12",
     "expo-build-properties": "57.0.10",
     "expo-dev-client": "57.0.11",
@@ -22,10 +23,7 @@
     "react-native-safe-area-context": "5.7.0"
   },
   "devDependencies": {
-    "@life-book/test-support": "workspace:*",
-    "@types/node": "24.13.3",
     "@types/react": "19.2.10",
-    "typescript": "6.0.3",
-    "vitest": "4.1.10"
+    "typescript": "6.0.3"
   }
 }

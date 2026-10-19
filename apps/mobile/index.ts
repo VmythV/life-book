@@ -1,5 +1,5 @@
 import { registerRootComponent } from 'expo';
 
-import { MobileScaffoldRoot } from './src/composition/mobile-scaffold-root';
+import { AppRoot } from './src/app-root';
 
-registerRootComponent(MobileScaffoldRoot);
+registerRootComponent(AppRoot);
