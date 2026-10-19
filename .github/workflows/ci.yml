@@ -18,6 +18,22 @@ jobs:
     name: Format, lint, typecheck and test
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: lifebook
+          POSTGRES_PASSWORD: lifebook
+          POSTGRES_DB: life_book_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lifebook -d life_book_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      TEST_DATABASE_URL: postgres://lifebook:lifebook@localhost:5432/life_book_test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
