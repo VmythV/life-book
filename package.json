@@ -8,6 +8,11 @@
     "pnpm": "11.21.0"
   },
   "scripts": {
+    "dev": "concurrently -k -n server,web -c blue,green \"pnpm --filter @life-book/server dev\" \"pnpm --filter @life-book/web dev\"",
+    "dev:mobile": "pnpm --filter @life-book/mobile start",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter @life-book/server db:migrate",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0",
@@ -17,6 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "24.13.3",
+    "concurrently": "10.0.6",
     "eslint": "9.39.5",
     "eslint-config-expo": "57.0.1",
     "eslint-config-prettier": "10.1.8",

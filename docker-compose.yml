@@ -1,0 +1,21 @@
+# 本地开发数据库。启动：pnpm db:up
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: lifebook
+      POSTGRES_PASSWORD: lifebook
+      POSTGRES_DB: life_book
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./apps/server/db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U lifebook -d life_book']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  postgres-data:
