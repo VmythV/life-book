@@ -1,0 +1,44 @@
+@import 'tailwindcss';
+
+/* 颜色来自 @life-book/design-tokens，由 src/theme.ts 写入 --lb-* 变量。 */
+@theme inline {
+  --color-canvas: var(--lb-canvas);
+  --color-surface: var(--lb-surface);
+  --color-surface-subtle: var(--lb-surface-subtle);
+  --color-surface-raised: var(--lb-surface-raised);
+  --color-fg: var(--lb-text-primary);
+  --color-fg-muted: var(--lb-text-secondary);
+  --color-fg-subtle: var(--lb-text-tertiary);
+  --color-link: var(--lb-text-link);
+  --color-line: var(--lb-border-default);
+  --color-line-strong: var(--lb-border-strong);
+  --color-brand: var(--lb-brand-primary);
+  --color-primary: var(--lb-action-primary);
+  --color-primary-hover: var(--lb-action-primary-hover);
+  --color-primary-pressed: var(--lb-action-primary-pressed);
+  --color-on-primary: var(--lb-action-on-primary);
+  --color-disabled: var(--lb-action-disabled);
+  --color-on-disabled: var(--lb-action-on-disabled);
+  --color-focus: var(--lb-focus-ring);
+  --color-danger: var(--lb-state-danger-foreground);
+  --color-danger-container: var(--lb-state-danger-container);
+  --color-info: var(--lb-state-info-foreground);
+  --color-info-container: var(--lb-state-info-container);
+
+  --font-sans:
+    system-ui, -apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    sans-serif;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@life-book/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@life-book/api-client": "workspace:*",
+    "@life-book/core": "workspace:*",
+    "@life-book/design-tokens": "workspace:*",
+    "@tanstack/react-query": "5.104.4",
+    "@tanstack/react-router": "1.170.45",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.2.10",
+    "@types/react-dom": "19.2.7",
+    "@vitejs/plugin-react": "6.1.2",
+    "tailwindcss": "4.3.3",
+    "typescript": "6.0.3",
+    "vite": "8.3.4"
+  }
+}
