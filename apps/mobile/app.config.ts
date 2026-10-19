@@ -19,13 +19,16 @@ export default function appConfig({ config }: ConfigContext): ExpoConfig {
       allowBackup: false,
       predictiveBackGestureEnabled: true,
     },
+    extra: {
+      // 不设置时，开发构建会自动使用运行 Metro 的电脑的局域网地址。
+      apiUrl: process.env.LIFE_BOOK_API_URL,
+    },
     plugins: [
+      'expo-router',
+      'expo-secure-store',
       [
         'expo-build-properties',
         {
-          ios: {
-            deploymentTarget: '16.0',
-          },
           android: {
             minSdkVersion: 29,
             compileSdkVersion: 36,

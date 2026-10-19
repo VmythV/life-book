@@ -2,7 +2,7 @@
   "name": "@life-book/mobile",
   "version": "0.0.0",
   "private": true,
-  "main": "./index.ts",
+  "main": "expo-router/entry",
   "scripts": {
     "start": "expo start --dev-client",
     "android": "expo run:android",
@@ -12,15 +12,24 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@expo/vector-icons": "15.1.1",
+    "@life-book/api-client": "workspace:*",
+    "@life-book/core": "workspace:*",
     "@life-book/design-tokens": "workspace:*",
+    "@tanstack/react-query": "5.104.4",
     "expo": "57.0.12",
     "expo-build-properties": "57.0.10",
+    "expo-constants": "57.0.22",
     "expo-dev-client": "57.0.11",
+    "expo-linking": "57.0.13",
+    "expo-router": "57.0.28",
+    "expo-secure-store": "57.0.4",
     "expo-status-bar": "57.0.1",
     "expo-system-ui": "57.0.2",
     "react": "19.2.3",
     "react-native": "0.86.2",
-    "react-native-safe-area-context": "5.7.0"
+    "react-native-safe-area-context": "5.7.0",
+    "react-native-screens": "4.26.2"
   },
   "devDependencies": {
     "@types/react": "19.2.10",
