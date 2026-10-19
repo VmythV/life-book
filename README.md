@@ -19,16 +19,39 @@
 - 可靠，让该出现的信息在需要时出现。
 - 贴近日常，从真实的小事出发，而不是堆叠效率概念。
 
+## 多端
+
+| 端                    | 技术                     | 目录                    |
+| --------------------- | ------------------------ | ----------------------- |
+| 手机（iOS / Android） | Expo（React Native）     | `apps/mobile`           |
+| Web                   | React + Vite             | `apps/web`（待创建）    |
+| 后台服务              | Node + Hono + PostgreSQL | `apps/server`（待创建） |
+
+三端登录同一账号，共用一个后台服务和数据库。
+
 ## 项目状态
 
-项目目前处于早期规划阶段，正在逐步完善产品定义、信息架构和技术方案。
+仓库已经精简完成（阶段 0），下一步是打通三端登录（阶段 1），目标是尽快做出可以每天使用的 MVP。详见 [开发计划](docs/plan.md)。
 
 ## 文档
 
-- [品牌命名方案](docs/brand-name.md)
-- [产品功能说明](docs/product-features.md)
-- [产品决策记录](docs/product-decisions.md)
-- [产品路线图](docs/roadmap.md)
+- [产品说明](docs/product.md)：定位、五类记录、规则和分期
+- [技术架构](docs/architecture.md)：技术栈、仓库结构、认证、提醒机制
+- [数据模型](docs/data-model.md)：表结构
+- [接口约定](docs/api.md)：API 规范与清单
+- [开发计划](docs/plan.md)：阶段、任务和未决问题
+- [决策记录](docs/decisions.md)：重要决定及与旧文档的关系
+- [归档资料](archive/README.md)：旧规划文档，只读参考
+
+## 本地开发
+
+需要 Node 24（见 `.node-version`）并启用 Corepack：
+
+```sh
+corepack enable
+pnpm install
+pnpm verify   # 格式、lint、类型检查和单测
+```
 
 ## 品牌
 
