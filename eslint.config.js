@@ -7,20 +7,16 @@ module.exports = defineConfig([
   globalIgnores([
     '**/.expo/**',
     '**/android/**',
+    '**/ios/**',
     '**/coverage/**',
     '**/dist/**',
     '**/node_modules/**',
-    'packages/ui/src/generated/**',
+    'archive/**',
   ]),
   expoConfig,
   prettierConfig,
   {
     files: ['**/*.{ts,tsx}'],
-    settings: {
-      react: {
-        version: '19.2',
-      },
-    },
     rules: {
       '@typescript-eslint/consistent-type-imports': [
         'error',
@@ -38,38 +34,7 @@ module.exports = defineConfig([
     },
   },
   {
-    files: ['apps/mobile/src/**/*.{ts,tsx}'],
-    rules: {
-      'no-restricted-globals': [
-        'error',
-        {
-          name: 'fetch',
-          message: 'M0 production code cannot register a network path.',
-        },
-        {
-          name: 'WebSocket',
-          message: 'M0 production code cannot register a network path.',
-        },
-        {
-          name: 'XMLHttpRequest',
-          message: 'M0 production code cannot register a network path.',
-        },
-      ],
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector: "MemberExpression[object.name='process'][property.name='env']",
-          message: 'Runtime code reads typed config ports, never process.env.',
-        },
-      ],
-    },
-  },
-  {
-    files: [
-      '*.config.{js,mjs,ts}',
-      'apps/mobile/app.config.ts',
-      'tools/**/*.{js,mjs,ts}',
-    ],
+    files: ['*.config.{js,mjs,ts}', 'apps/mobile/app.config.ts'],
     languageOptions: {
       globals: globals.node,
     },

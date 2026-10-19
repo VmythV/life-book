@@ -1,5 +1,8 @@
 **/.expo/**
 **/android/**
+**/ios/**
 **/coverage/**
+**/dist/**
 **/node_modules/**
-packages/ui/src/generated/**
+archive/**
+pnpm-lock.yaml

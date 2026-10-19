@@ -4,8 +4,7 @@ node_modules/
 coverage/
 dist/
 apps/mobile/android/
-apps/android-capability-spike/android/
-apps/android-capability-spike/modules/*/android/build/
+apps/mobile/ios/
 *.log
 .env
 .env.*
