@@ -3,7 +3,7 @@ import {
   DESIGN_RADIUS_TOKENS,
   DESIGN_SPACE_TOKENS,
   DESIGN_TYPE_TOKENS,
-} from './generated/design-tokens.generated';
+} from './tokens';
 
 export type LifeBookColorScheme = 'dark' | 'light';
 export type LifeBookColorToken = keyof typeof DESIGN_COLOR_TOKENS;
