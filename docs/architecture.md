@@ -28,20 +28,20 @@
 
 ## 2. 技术选型
 
-| 部分       | 选择                                                                                | 说明                                                                                                                        |
-| ---------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| 语言       | TypeScript（strict）                                                                | 三端与服务端统一。                                                                                                          |
-| 包管理     | pnpm workspace                                                                      | 单仓库、单 lockfile。                                                                                                       |
-| 后台框架   | Hono + `@hono/node-server`                                                          | 轻量，原生支持 zod 校验，并能导出路由类型给客户端。                                                                         |
-| 数据库     | PostgreSQL 18                                                                       | 18 版原生提供 `uuidv7()`。                                                                                                  |
-| ORM 与迁移 | Drizzle ORM + drizzle-kit                                                           | 表结构用 TypeScript 定义，迁移生成 SQL 文件并入库。                                                                         |
-| 认证       | 自己实现：用户名 + 密码                                                             | 密码用 Node 内置 scrypt 哈希；会话令牌随机生成，数据库只存其 SHA-256；Web 用 Cookie，手机用 Bearer 令牌（存 SecureStore）。 |
-| 校验       | zod                                                                                 | 请求和响应的 schema 放在 `@life-book/core`，前后端共用。                                                                    |
-| 日期时间   | date-fns + `@date-fns/tz`                                                           | 业务日期按用户时区计算。                                                                                                    |
-| Web        | Vite + React 19 + TanStack Router + TanStack Query + Tailwind CSS                   | 纯前端 SPA，部署为静态文件。                                                                                                |
-| 手机       | Expo SDK 57 + Expo Router + TanStack Query + expo-notifications + expo-secure-store | iOS 16+、Android 10+。                                                                                                      |
-| 测试       | Vitest；服务端集成测试连真实 PostgreSQL                                             | 业务规则以 `core` 单测为主。                                                                                                |
-| 本地开发   | Docker Compose 启动 PostgreSQL                                                      | `pnpm dev` 同时启动服务端和 Web。                                                                                           |
+| 部分       | 选择                                                                                | 说明                                                                                                                                                              |
+| ---------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 语言       | TypeScript（strict）                                                                | 三端与服务端统一。                                                                                                                                                |
+| 包管理     | pnpm workspace                                                                      | 单仓库、单 lockfile。                                                                                                                                             |
+| 后台框架   | Hono + `@hono/node-server`                                                          | 轻量，测试时可直接 `app.request()` 而不必监听端口。                                                                                                               |
+| 数据库     | PostgreSQL 18                                                                       | 18 版原生提供 `uuidv7()`。                                                                                                                                        |
+| ORM 与迁移 | Drizzle ORM + drizzle-kit                                                           | 表结构用 TypeScript 定义，迁移生成 SQL 文件并入库。                                                                                                               |
+| 认证       | 自己实现：用户名 + 密码                                                             | 密码用 Node 内置 scrypt 哈希；会话令牌随机生成，数据库只存其 SHA-256；Web 用 Cookie，手机用 Bearer 令牌（存 SecureStore）。                                       |
+| 校验       | zod                                                                                 | 接口契约（请求和响应 schema）放在 `@life-book/core`：服务端用它校验请求，客户端用它推导类型并校验响应。不直接引用服务端路由类型，避免客户端编译时牵连服务端代码。 |
+| 日期时间   | date-fns + `@date-fns/tz`                                                           | 业务日期按用户时区计算。                                                                                                                                          |
+| Web        | Vite + React 19 + TanStack Router + TanStack Query + Tailwind CSS                   | 纯前端 SPA，部署为静态文件。                                                                                                                                      |
+| 手机       | Expo SDK 57 + Expo Router + TanStack Query + expo-notifications + expo-secure-store | iOS 16.4+（Expo SDK 57 的最低要求）、Android 10+。                                                                                                                |
+| 测试       | Vitest；服务端集成测试连真实 PostgreSQL                                             | 业务规则以 `core` 单测为主。                                                                                                                                      |
+| 本地开发   | Docker Compose 启动 PostgreSQL                                                      | `pnpm dev` 同时启动服务端（8787）和 Web（5180）；Web 通过 Vite 代理同源访问 `/api`。                                                                              |
 
 ## 3. 仓库结构
 
@@ -51,8 +51,8 @@ apps/
   web/             Web 端（Vite + React）
   mobile/          手机端（Expo）
 packages/
-  core/            领域类型、zod schema、纯业务规则（无 IO）
-  api-client/      类型安全的 HTTP 客户端 + TanStack Query hooks（Web 与手机共用）
+  core/            接口契约（zod schema）、领域类型、纯业务规则（无 IO）
+  api-client/      类型安全的 HTTP 客户端、错误类型和查询键（Web 与手机共用）
   design-tokens/   颜色、间距、字号等设计令牌（Web 与手机共用）
 docs/              当前有效的文档
 archive/           旧文档与合同，只读参考
@@ -103,7 +103,7 @@ reminders + 记录规则  ──GET /reminders/upcoming──▶  计算出的�
 
 ## 8. 部署（暂不考虑）
 
-当前只做本地开发：PostgreSQL 用 Docker Compose 启动，服务端和 Web 在本机运行，手机连接本机局域网地址。下表是以后需要部署时的初步设想，届时再决定。
+当前只做本地开发：PostgreSQL 用 Docker Compose 启动，服务端和 Web 在本机运行。手机开发构建默认访问运行 Metro 的电脑的局域网地址（端口 8787），也可以用环境变量 `LIFE_BOOK_API_URL` 指定。下表是以后需要部署时的初步设想，届时再决定。
 
 | 部分   | 方案                                                               |
 | ------ | ------------------------------------------------------------------ |

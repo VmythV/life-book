@@ -1,6 +1,6 @@
 # 接口约定
 
-> 路由的请求和响应 schema 以 `packages/core` 中的 zod 定义为准；客户端通过 `@life-book/api-client` 调用，类型直接来自服务端路由。本文只列约定和清单。
+> 路由的请求和响应 schema 以 `packages/core` 中的 zod 定义为准；服务端用它校验请求，客户端通过 `@life-book/api-client` 调用并用同一份 schema 校验响应。本文只列约定和清单。
 
 ## 1. 通用约定
 

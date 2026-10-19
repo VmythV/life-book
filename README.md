@@ -21,17 +21,17 @@
 
 ## 多端
 
-| 端                    | 技术                     | 目录                    |
-| --------------------- | ------------------------ | ----------------------- |
-| 手机（iOS / Android） | Expo（React Native）     | `apps/mobile`           |
-| Web                   | React + Vite             | `apps/web`（待创建）    |
-| 后台服务              | Node + Hono + PostgreSQL | `apps/server`（待创建） |
+| 端                    | 技术                     | 目录          |
+| --------------------- | ------------------------ | ------------- |
+| 手机（iOS / Android） | Expo（React Native）     | `apps/mobile` |
+| Web                   | React + Vite             | `apps/web`    |
+| 后台服务              | Node + Hono + PostgreSQL | `apps/server` |
 
 三端登录同一账号，共用一个后台服务和数据库。
 
 ## 项目状态
 
-仓库已经精简完成（阶段 0），下一步是打通三端登录（阶段 1），目标是尽快做出可以每天使用的 MVP。详见 [开发计划](docs/plan.md)。
+阶段 1 基本完成：服务端和 Web 已能注册、登录；手机端代码已完成，等待在模拟器或真机上运行。下一步是阶段 2 的 MVP。详见 [开发计划](docs/plan.md)。
 
 ## 文档
 
@@ -45,12 +45,31 @@
 
 ## 本地开发
 
-需要 Node 24（见 `.node-version`）并启用 Corepack：
+需要 Node 24（见 `.node-version`）、Corepack 和 Docker：
 
 ```sh
 corepack enable
 pnpm install
-pnpm verify   # 格式、lint、类型检查和单测
+pnpm db:up        # 启动 PostgreSQL 18（端口 5432）
+pnpm db:migrate   # 建表
+pnpm dev          # 服务端 http://localhost:8787，Web http://localhost:5180
+```
+
+手机端（需要先安装 Xcode 或 Android SDK 来构建开发包）：
+
+```sh
+pnpm --filter @life-book/mobile android   # 或 ios，首次会构建原生开发包
+pnpm dev:mobile                           # 之后只需启动 Metro
+```
+
+手机默认访问运行 Metro 的电脑的局域网地址，请确保手机和电脑在同一网络；也可以设置 `LIFE_BOOK_API_URL` 指定服务端地址。
+
+常用命令：
+
+```sh
+pnpm verify    # 格式、lint、类型检查和全部测试（服务端测试需要先 pnpm db:up）
+pnpm --filter @life-book/server db:generate          # 修改表结构后生成迁移
+pnpm --filter @life-book/server reset-password <用户名>   # 忘记密码时生成临时密码
 ```
 
 ## 品牌

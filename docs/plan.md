@@ -5,7 +5,8 @@
 ## 当前进度
 
 - **阶段 0（仓库精简）**：已完成。
-- **下一步**：阶段 1，在本地打通三端和后台服务。
+- **阶段 1（打通三端）**：服务端和 Web 已在本地跑通；手机端代码已完成并能为两个平台打包，还差在模拟器或真机上实际运行（需要 Xcode 或 Android SDK）。
+- **下一步**：阶段 2，MVP。
 - **暂不考虑部署**：阶段 4 搁置，先全部在本地跑通（见 [D-009](decisions.md)）。
 
 ## 阶段 0：仓库精简 ✅
@@ -23,34 +24,34 @@
 
 **共享包**
 
-- [ ] `packages/core`：zod、基础类型（记录类型、日期和时刻格式）、Vitest
-- [ ] `packages/api-client`：基于服务端路由类型的 HTTP 客户端、登录状态管理、TanStack Query 的 `QueryClient` 默认配置
+- [x] `packages/core`：接口契约（zod schema）、时区和时刻格式、表单校验工具、Vitest
+- [x] `packages/api-client`：HTTP 客户端（Cookie 和令牌两种模式）、错误类型、查询键
 
 **后台服务 `apps/server`**
 
-- [ ] Hono 骨架、`/health`、用 zod 校验环境变量
-- [ ] `docker-compose.yml` 启动 PostgreSQL 18；`.env.example`
-- [ ] Drizzle 配置；首个迁移包含 `users`、`sessions`、`user_settings`
-- [ ] 用户名 + 密码认证：注册、登录、退出、修改密码；scrypt 哈希；会话中间件把 `userId` 放入上下文；`GET /api/v1/me`
-- [ ] 重置密码脚本 `reset-password <username>`（没有邮箱，忘记密码时在本地用）
-- [ ] 集成测试基础：连接测试库，每个测试结束后清空数据
-- [ ] 注册、登录、退出和访问 `/me` 的集成测试
+- [x] Hono 骨架、`/health`、用 zod 校验环境变量
+- [x] `docker-compose.yml` 启动 PostgreSQL 18；`.env.example`
+- [x] Drizzle 配置；首个迁移包含 `users`、`sessions`、`user_settings`
+- [x] 用户名 + 密码认证：注册、登录、退出、修改密码；scrypt 哈希；会话中间件把 `userId` 放入上下文；`GET /api/v1/me`
+- [x] 重置密码脚本 `reset-password <username>`（没有邮箱，忘记密码时在本地用）
+- [x] 集成测试基础：连接测试库，每个测试结束后清空数据
+- [x] 注册、登录、退出、修改密码、会话过期与续期、限流和 `/me` 的集成测试
 
 **Web `apps/web`**
 
-- [ ] Vite + React + TanStack Router + TanStack Query + Tailwind CSS，接入 `design-tokens`
-- [ ] 注册和登录页面、需要登录的布局（左侧导航）、空的“今天”页面
+- [x] Vite + React + TanStack Router + TanStack Query + Tailwind CSS，接入 `design-tokens`
+- [x] 注册和登录页面、需要登录的布局（左侧导航）、空的“今天”页面、设置页（账号信息、修改密码、退出登录）
 
 **手机 `apps/mobile`**
 
-- [ ] Expo Router；登录和注册页（令牌存 SecureStore）；开发时通过本机局域网地址访问服务端
-- [ ] 底部标签“今天 / 生活簿 / 家中 / 我的”，先放空页面
-- [ ] 在 iOS 模拟器和 Android 真机上跑通开发构建
+- [x] Expo Router；登录和注册页（令牌存 SecureStore）；开发时通过本机局域网地址访问服务端
+- [x] 底部标签“今天 / 生活簿 / 家中 / 我的”，先放空页面
+- [ ] 在 iOS 模拟器和 Android 真机上跑通开发构建（本机需先安装 Xcode 或 Android SDK，或改用 EAS 云构建）
 
 **工程**
 
-- [ ] 根脚本 `pnpm dev`：同时启动服务端和 Web
-- [ ] CI 增加 PostgreSQL service，跑服务端集成测试
+- [x] 根脚本 `pnpm dev`：同时启动服务端和 Web；`pnpm db:up` / `db:migrate`
+- [x] CI 增加 PostgreSQL service，跑服务端集成测试
 
 **完成标准**：在本地，同一个用户名在 Web、iOS 模拟器和 Android 真机上都能登录和退出；未登录访问 API 返回 401；CI 通过。
 
