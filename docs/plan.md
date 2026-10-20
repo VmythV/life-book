@@ -134,6 +134,9 @@
 - [x] 详情页“最近”：改期到某天后，那天原本的一次也要显示
 - [x] 手机“生活簿”可以查看已归档的记录、按分类筛选
 - [x] 手机“我的”里修改密码
+- [x] 取消注册入口和注册接口，账号用 `pnpm create-user` 脚本创建（见 D-024）
+- [x] 日历：按日、周、月查看，标出今天和有内容的日期，点日期看当天事项、点事项看详情（Web 和 Android，见 D-025）
+- [x] Web 用局域网 IP（http）访问时新建记录报错：`crypto.randomUUID` 只在 HTTPS 或 localhost 下可用，改用 `crypto.getRandomValues` 生成 ID
 
 **工程**
 

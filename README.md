@@ -49,6 +49,7 @@ MVP 和 V1 功能已完成，Web 和 Android 真机已在本地跑通。下一�
 
 ```sh
 pnpm serve            # 启动数据库、构建 Web、迁移并启动服务端，一直开着
+pnpm create-user <用户名> [显示名称]   # 新建账号，密码在终端里输入；应用里没有注册入口
 ```
 
 启动后会打印局域网地址，如 `http://192.168.1.5:8787`：
@@ -90,6 +91,7 @@ pnpm dev:mobile                           # 之后只需启动 Metro
 ```sh
 pnpm verify    # 格式、lint、类型检查和全部测试（服务端测试需要先 pnpm db:up）
 pnpm --filter @life-book/server db:generate          # 修改表结构后生成迁移
+pnpm create-user <用户名> [显示名称]                      # 新建账号（应用里没有注册入口）
 pnpm --filter @life-book/server reset-password <用户名>   # 忘记密码时生成临时密码
 ```
 

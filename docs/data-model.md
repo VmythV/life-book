@@ -38,7 +38,7 @@ users ─┬─ sessions (1:N)
 ```sql
 create table users (
   id            uuid primary key default uuidv7(),
-  username      text not null,           -- 3～32 位小写字母、数字或下划线，注册时转为小写
+  username      text not null,           -- 3～32 位小写字母、数字或下划线，创建时转为小写
   display_name  text,
   password_hash text not null,           -- scrypt$N$r$p$salt$hash
   created_at    timestamptz not null default now(),
@@ -68,6 +68,7 @@ create table user_settings (
 
 `users` 是用户本身，主键 `id` 就是其他表里的 `user_id`；其余表都带 `user_id`。
 
+- 应用里没有注册入口，账号用服务端脚本 `pnpm create-user <用户名> [显示名称]` 创建（见 D-024）。
 - 修改密码后删除该用户的其他会话。
 - 不收集邮箱或手机号，所以**忘记密码无法自助找回**。本地开发阶段用服务端脚本 `pnpm --filter @life-book/server reset-password <username>` 重置。
 

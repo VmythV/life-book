@@ -62,7 +62,7 @@ archive/           旧文档与合同，只读参考
 
 ## 4. 认证与数据隔离
 
-1. 用户用用户名和密码注册或登录后，服务端生成随机会话令牌，在 `sessions` 表里只保存令牌的 SHA-256。Web 收到 httpOnly Cookie；手机收到令牌后存进 SecureStore，之后每次请求放在 `Authorization: Bearer` 里。会话有效期 30 天，使用中自动续期。
+1. 账号由服务端脚本创建（没有注册接口）。用户用用户名和密码登录后，服务端生成随机会话令牌，在 `sessions` 表里只保存令牌的 SHA-256。Web 收到 httpOnly Cookie；手机收到令牌后存进 SecureStore，之后每次请求放在 `Authorization: Bearer` 里。会话有效期 30 天，使用中自动续期。
 2. 服务端中间件校验会话，把 `userId` 放进请求上下文。**`user_id` 只能来自会话，不能来自请求参数或请求体。**
 3. 每个服务层函数都接收 `userId`，每条 SQL 都带 `where user_id = $userId`。读、改、删别人的数据一律按“不存在”返回 404。
 4. 子表通过复合外键 `(record_id, user_id) → records(id, user_id)` 保证子行和父记录属于同一用户，数据库层面就无法串号。
@@ -116,7 +116,7 @@ reminders + 记录规则  ──GET /reminders/upcoming──▶  计算出的�
 ## 9. 安全基线
 
 - 密码至少 8 位，用 scrypt 加随机盐哈希，比较时用 `timingSafeEqual`；登录失败统一提示“用户名或密码错误”。
-- 登录和注册接口按 IP 和用户名限流。
+- 登录接口按 IP 和用户名限流。
 - 部署时：全站 HTTPS；CORS 只允许自家 Web 域名。
 - 密钥和数据库连接串只放环境变量，仓库只提交 `.env.example`。
 - 日志不记录记录正文、密码或令牌。

@@ -19,9 +19,10 @@
 
 ### 账号与设置（MVP）
 
+没有注册接口：账号由服务端脚本 `pnpm create-user <用户名> [显示名称]` 创建（见 D-024）。
+
 | 方法     | 路径                           | 说明                                                                                          |
 | -------- | ------------------------------ | --------------------------------------------------------------------------------------------- |
-| `POST`   | `/api/v1/auth/register`        | 注册：`{ "username", "password", "displayName"? }`，成功后直接登录                            |
 | `POST`   | `/api/v1/auth/login`           | 登录：`{ "username", "password" }`；返回用户信息，Web 同时设置 Cookie，手机取响应里的 `token` |
 | `POST`   | `/api/v1/auth/logout`          | 退出：删除当前会话                                                                            |
 | `POST`   | `/api/v1/auth/change-password` | 修改密码：`{ "currentPassword", "newPassword" }`，其他会话失效                                |
@@ -32,10 +33,11 @@
 
 ### 今天与提醒（MVP）
 
-| 方法  | 路径                                | 说明                                                                                |
-| ----- | ----------------------------------- | ----------------------------------------------------------------------------------- |
-| `GET` | `/api/v1/today?date=2026-10-19`     | 今天聚合；`date` 默认按用户时区取当天                                               |
-| `GET` | `/api/v1/reminders/upcoming?days=7` | 未来提醒列表，供手机调度通知；`days` 为 1～30，默认 7。已完成或已跳过的实例不再提醒 |
+| 方法  | 路径                                             | 说明                                                                                |
+| ----- | ------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `GET` | `/api/v1/today?date=2026-10-19`                  | 今天聚合；`date` 默认按用户时区取当天                                               |
+| `GET` | `/api/v1/calendar?from=2026-09-28&to=2026-11-01` | 日历：区间内每天的事项，一次最多 62 天（见 D-025）                                  |
+| `GET` | `/api/v1/reminders/upcoming?days=7`              | 未来提醒列表，供手机调度通知；`days` 为 1～30，默认 7。已完成或已跳过的实例不再提醒 |
 
 ### 记录（MVP）
 
@@ -74,7 +76,6 @@
 | `NOT_FOUND`           | 404    | 不存在，或属于其他用户                                |
 | `VERSION_CONFLICT`    | 409    | 记录已在别处修改；`details.currentVersion` 为最新版本 |
 | `ID_CONFLICT`         | 409    | 客户端生成的记录 ID 已被其他用户使用                  |
-| `USERNAME_TAKEN`      | 409    | 用户名已被注册                                        |
 | `TOO_MANY_REQUESTS`   | 429    | 尝试次数过多                                          |
 | `INTERNAL_ERROR`      | 500    | 服务器内部错误                                        |
 
@@ -185,5 +186,7 @@ POST /api/v1/records
   ]
 }
 ```
+
+日历的响应是 `{ from, to, today, items }`，`items` 按日期排序，同一天里全天的在前、其余按时刻；每项都带 `date`，`kind` 与“今天”相同（`occurrence`、`important_date`、`checklist`、`memo_reminder`）。重要日期不带 `daysUntil`，过去未处理的实例状态为 `overdue`。
 
 `overdue` 和 `today` 里还会有 `kind: "checklist"` 的卡片（截止日期在今天或已过期、未完成的清单）；`lowStock` 列出低库存的家庭物品。周期实例卡片带 `originalDate`，改期后与 `date` 不同。
