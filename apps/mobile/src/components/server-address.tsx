@@ -7,7 +7,7 @@ import { checkServer, defaultServerUrl, server, useServerUrl } from '../lib/serv
 import { useTheme } from '../lib/theme';
 import { ErrorBanner, SmallButton, TextField } from './ui';
 
-/** 服务器地址（登录、注册页底部和“我的”）：电脑换了局域网地址时在这里改，不用重新安装应用。 */
+/** 服务器地址（登录页底部和“我的”）：电脑换了局域网地址时在这里改，不用重新安装应用。 */
 export function ServerAddress() {
   const theme = useTheme();
   const url = useServerUrl();

@@ -43,6 +43,12 @@ export const todayQuery = queryOptions({
   queryFn: () => api.today.get(),
 });
 
+export const calendarQuery = (from: string, to: string) =>
+  queryOptions({
+    queryKey: queryKeys.calendar(from, to),
+    queryFn: () => api.calendar.get(from, to),
+  });
+
 export const recordQuery = (id: string) =>
   queryOptions({
     queryKey: queryKeys.record(id),

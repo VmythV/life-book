@@ -8,6 +8,7 @@ type IconName = ComponentProps<typeof Ionicons>['name'];
 
 const tabs: { name: string; title: string; icon: IconName }[] = [
   { name: 'index', title: '今天', icon: 'sunny-outline' },
+  { name: 'calendar', title: '日历', icon: 'calendar-outline' },
   { name: 'book', title: '生活簿', icon: 'book-outline' },
   { name: 'home', title: '家中', icon: 'home-outline' },
   { name: 'me', title: '我的', icon: 'person-outline' },

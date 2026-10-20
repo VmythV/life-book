@@ -1,7 +1,6 @@
 import { describeError } from '@life-book/api-client';
 import { type FieldErrors, loginRequestSchema, validateFields } from '@life-book/core';
 import { useMutation } from '@tanstack/react-query';
-import { Link } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -67,12 +66,9 @@ export default function LoginScreen() {
           error={fieldErrors.password === undefined ? undefined : '请输入密码'}
         />
         <Button label="登录" onPress={submit} loading={login.isPending} />
-        <Link
-          href="/register"
-          style={[theme.type['type.label'], { color: theme.color.textLink }]}
-        >
-          还没有账号？注册
-        </Link>
+        <Text style={[theme.type['type.caption'], { color: theme.color.textSecondary }]}>
+          还没有账号？请联系管理员开通。
+        </Text>
       </View>
       <ServerAddress />
     </Screen>
