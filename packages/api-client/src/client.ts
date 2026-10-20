@@ -3,6 +3,8 @@ import {
   type BatchRequest,
   type BatchResponse,
   batchResponseSchema,
+  type CalendarResponse,
+  calendarResponseSchema,
   type AddToShoppingListResponse,
   addToShoppingListResponseSchema,
   type AuthResponse,
@@ -35,7 +37,6 @@ import {
   type RecordListResponse,
   recordListResponseSchema,
   recordSchema,
-  type RegisterRequest,
   type ReorderRequest,
   type RescheduleRequest,
   type SaveAsTemplateRequest,
@@ -168,11 +169,6 @@ export function createApiClient(options: ApiClientOptions) {
 
   return {
     auth: {
-      register: (input: RegisterRequest): Promise<AuthResponse> =>
-        call('POST', '/api/v1/auth/register', {
-          body: input,
-          schema: authResponseSchema,
-        }),
       login: (input: LoginRequest): Promise<AuthResponse> =>
         call('POST', '/api/v1/auth/login', { body: input, schema: authResponseSchema }),
       logout: (): Promise<void> =>
@@ -371,6 +367,12 @@ export function createApiClient(options: ApiClientOptions) {
           schema: todayResponseSchema,
         }),
     },
+    calendar: {
+      get: (from: LocalDate, to: LocalDate): Promise<CalendarResponse> =>
+        call('GET', `/api/v1/calendar${queryString({ from, to })}`, {
+          schema: calendarResponseSchema,
+        }),
+    },
     reminders: {
       upcoming: (days?: number): Promise<UpcomingRemindersResponse> =>
         call('GET', `/api/v1/reminders/upcoming${queryString({ days })}`, {
@@ -442,6 +444,8 @@ export const queryKeys = {
   /** 所有“今天”查询的前缀；完成、跳过或修改记录后整体失效。 */
   today: ['today'] as const,
   todayOn: (date: LocalDate | undefined) => ['today', date ?? 'current'] as const,
+  /** 日历也挂在“今天”下面，和它一起失效。 */
+  calendar: (from: LocalDate, to: LocalDate) => ['today', 'calendar', from, to] as const,
   /** 所有记录查询（列表、详情、实例）的前缀。 */
   records: ['records'] as const,
   recordList: (query: RecordListQuery) => ['records', 'list', query] as const,
