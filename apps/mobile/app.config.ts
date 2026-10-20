@@ -18,6 +18,8 @@ export default function appConfig({ config }: ConfigContext): ExpoConfig {
       package: 'dev.lifebook.app',
       allowBackup: false,
       predictiveBackGestureEnabled: true,
+      // 允许时用精确闹钟安排提醒，否则系统可能推迟几分钟。
+      permissions: ['android.permission.SCHEDULE_EXACT_ALARM'],
     },
     extra: {
       // 不设置时，开发构建会自动使用运行 Metro 的电脑的局域网地址。
@@ -26,6 +28,7 @@ export default function appConfig({ config }: ConfigContext): ExpoConfig {
     plugins: [
       'expo-router',
       'expo-secure-store',
+      'expo-notifications',
       [
         'expo-build-properties',
         {
