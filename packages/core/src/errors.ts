@@ -8,6 +8,9 @@ export const errorCodes = [
   'USERNAME_TAKEN',
   'TOO_MANY_REQUESTS',
   'NOT_FOUND',
+  'VERSION_CONFLICT',
+  'ID_CONFLICT',
+  'NAME_TAKEN',
   'INTERNAL_ERROR',
 ] as const;
 

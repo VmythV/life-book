@@ -1,4 +1,7 @@
-import { type z } from 'zod';
+import { z } from 'zod';
+
+// 共享 schema 没有自定义文案的地方，用 zod 自带的简体中文提示。
+z.config(z.locales.zhCN());
 
 export type FieldErrors = Partial<Record<string, string>>;
 

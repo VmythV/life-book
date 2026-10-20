@@ -19,3 +19,12 @@ export type MeResponse = z.infer<typeof meResponseSchema>;
 
 export const updateSettingsRequestSchema = userSettingsSchema.partial();
 export type UpdateSettingsRequest = z.input<typeof updateSettingsRequestSchema>;
+
+/** 删除账号需要再输入一次密码。 */
+export const deleteAccountRequestSchema = z.object({
+  password: z.string().min(1, { message: '请输入密码' }).max(128),
+});
+export type DeleteAccountRequest = z.input<typeof deleteAccountRequestSchema>;
+
+/** 导出文件的格式版本；结构变化时加一。 */
+export const EXPORT_FORMAT_VERSION = 1;
