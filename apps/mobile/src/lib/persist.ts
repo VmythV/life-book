@@ -15,7 +15,7 @@ export const persistOptions: Omit<PersistQueryClientOptions, 'queryClient'> = {
   persister,
   maxAge: 7 * 24 * 60 * 60 * 1000,
   // 发版后数据结构可能变化，改这个值即可丢弃旧缓存。
-  buster: '3',
+  buster: '4',
 };
 
 /** 退出登录时清空内存和本机的缓存，避免下一个账号看到上一个账号的数据。 */

@@ -100,6 +100,10 @@ export default function RootLayout() {
               name="record/[id]/index"
               options={{ ...header, title: '详情' }}
             />
+            <Stack.Screen
+              name="record/[id]/item/[itemId]"
+              options={{ ...header, title: '编辑项目' }}
+            />
             <Stack.Screen name="trash" options={{ ...header, title: '回收站' }} />
             <Stack.Screen
               name="record/[id]/edit"

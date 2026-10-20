@@ -1,4 +1,9 @@
-import { describeError, queryKeys } from '@life-book/api-client';
+import { describeError, isApiError, queryKeys } from '@life-book/api-client';
+import {
+  changePasswordRequestSchema,
+  type FieldErrors,
+  validateFields,
+} from '@life-book/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -149,6 +154,7 @@ export default function MeScreen() {
       )}
 
       <Button label="回收站" variant="secondary" onPress={() => router.push('/trash')} />
+      <ChangePasswordCard />
       <DeleteAccountCard />
       <Button
         label="退出登录"
@@ -168,6 +174,83 @@ const styles = StyleSheet.create({
     gap: 12,
   },
 });
+
+/** 修改密码：成功后其他设备上的登录失效，本机保持登录。 */
+function ChangePasswordCard() {
+  const empty = { currentPassword: '', newPassword: '', confirmPassword: '' };
+  const [values, setValues] = useState(empty);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const changePassword = useMutation({
+    mutationFn: api.auth.changePassword,
+    onSuccess: () => setValues(empty),
+    onError: (error) => {
+      if (isApiError(error, 'WRONG_PASSWORD')) {
+        setFieldErrors({ currentPassword: error.message });
+      }
+    },
+  });
+  const update = (field: keyof typeof values) => (value: string) =>
+    setValues((current) => ({ ...current, [field]: value }));
+
+  function submit() {
+    changePassword.reset();
+    const { data, errors } = validateFields(changePasswordRequestSchema, values);
+    const nextErrors: FieldErrors = { ...errors };
+    if (values.confirmPassword !== values.newPassword) {
+      nextErrors.confirmPassword = '两次输入的密码不一致';
+    }
+    if (nextErrors.currentPassword !== undefined) {
+      nextErrors.currentPassword = '请输入当前密码';
+    }
+    setFieldErrors(nextErrors);
+    if (data !== null && nextErrors.confirmPassword === undefined) {
+      changePassword.mutate(data);
+    }
+  }
+
+  return (
+    <Card>
+      <BodyText bold>修改密码</BodyText>
+      {changePassword.isSuccess ? (
+        <InfoBanner message="密码已修改，其他设备上的登录已失效。" />
+      ) : null}
+      {changePassword.isError && !isApiError(changePassword.error, 'WRONG_PASSWORD') ? (
+        <ErrorBanner message={describeError(changePassword.error)} />
+      ) : null}
+      <TextField
+        label="当前密码"
+        secureTextEntry
+        autoComplete="current-password"
+        value={values.currentPassword}
+        onChangeText={update('currentPassword')}
+        error={fieldErrors.currentPassword}
+      />
+      <TextField
+        label="新密码"
+        hint="至少 8 位"
+        secureTextEntry
+        autoComplete="new-password"
+        value={values.newPassword}
+        onChangeText={update('newPassword')}
+        error={fieldErrors.newPassword}
+      />
+      <TextField
+        label="确认新密码"
+        secureTextEntry
+        autoComplete="new-password"
+        value={values.confirmPassword}
+        onChangeText={update('confirmPassword')}
+        error={fieldErrors.confirmPassword}
+      />
+      <Button
+        label="修改密码"
+        variant="secondary"
+        loading={changePassword.isPending}
+        onPress={submit}
+      />
+    </Card>
+  );
+}
 
 /** 删除账号：输入密码并再次确认。导出数据请在 Web 上进行。 */
 function DeleteAccountCard() {

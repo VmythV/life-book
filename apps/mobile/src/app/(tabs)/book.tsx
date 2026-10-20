@@ -31,7 +31,7 @@ import {
   Row,
   Title,
 } from '../../components/ui';
-import { meQuery, recordListQuery } from '../../lib/api';
+import { categoriesQuery, meQuery, recordListQuery } from '../../lib/api';
 import { useIsOnline } from '../../lib/online';
 import { useTheme } from '../../lib/theme';
 
@@ -42,6 +42,9 @@ export default function BookScreen() {
   const timeZone = me.data?.settings.timezone ?? 'Asia/Shanghai';
   const today = todayIn(timeZone);
   const [type, setType] = useState<CreatableRecordType | undefined>(undefined);
+  const [categoryId, setCategoryId] = useState<string | undefined>(undefined);
+  const [archived, setArchived] = useState(false);
+  const categories = useQuery(categoriesQuery);
   const [text, setText] = useState('');
   const [q, setQ] = useState('');
 
@@ -54,9 +57,14 @@ export default function BookScreen() {
   const list = useInfiniteQuery(
     recordListQuery({
       ...(type === undefined ? {} : { type }),
+      ...(categoryId === undefined ? {} : { categoryId }),
       ...(q === '' ? {} : { q }),
+      ...(archived ? { status: 'archived' as const } : {}),
     }),
   );
+  const filtered = type !== undefined || categoryId !== undefined || q !== '' || archived;
+  const onlyArchived =
+    archived && type === undefined && categoryId === undefined && q === '';
   const records = list.data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
@@ -119,6 +127,35 @@ export default function BookScreen() {
                 />
               ))}
             </ChipGroup>
+            <ChipGroup>
+              <Chip
+                label="使用中"
+                selected={!archived}
+                onPress={() => setArchived(false)}
+              />
+              <Chip
+                label="已归档"
+                selected={archived}
+                onPress={() => setArchived(true)}
+              />
+              {(categories.data?.items ?? []).length === 0 ? null : (
+                <>
+                  <Chip
+                    label="全部分类"
+                    selected={categoryId === undefined}
+                    onPress={() => setCategoryId(undefined)}
+                  />
+                  {(categories.data?.items ?? []).map((category) => (
+                    <Chip
+                      key={category.id}
+                      label={category.name}
+                      selected={categoryId === category.id}
+                      onPress={() => setCategoryId(category.id)}
+                    />
+                  ))}
+                </>
+              )}
+            </ChipGroup>
             {list.isError && records.length === 0 ? (
               <ErrorBanner message={describeError(list.error)} />
             ) : null}
@@ -129,11 +166,19 @@ export default function BookScreen() {
             <ActivityIndicator color={theme.color.textTertiary} />
           ) : list.isError ? null : (
             <EmptyState
-              title={type === undefined && q === '' ? '还没有记录' : '没有符合条件的记录'}
+              title={
+                onlyArchived
+                  ? '没有归档的记录'
+                  : filtered
+                    ? '没有符合条件的记录'
+                    : '还没有记录'
+              }
               message={
-                type === undefined && q === ''
-                  ? '点右下角的“+”开始记录。'
-                  : '换个条件试试。'
+                onlyArchived
+                  ? '在记录详情里点“归档”，记录就会移到这里。'
+                  : filtered
+                    ? '换个条件试试。'
+                    : '点右下角的“+”开始记录。'
               }
             />
           )

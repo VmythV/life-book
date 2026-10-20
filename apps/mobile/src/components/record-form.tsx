@@ -16,6 +16,8 @@ import {
   type RecordFormReminder,
   type RecordFormState,
   TODAY_VISIBILITY_HINTS,
+  DISCARD_CHANGES_MESSAGE,
+  isRecordFormDirty,
   todayIn,
   toRecordRequest,
   validateFields,
@@ -23,7 +25,9 @@ import {
 } from '@life-book/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type ReactNode, useState } from 'react';
-import { Linking, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useNavigation } from 'expo-router';
+import { usePreventRemove } from 'expo-router/react-navigation';
+import { Alert, Linking, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { api, categoriesQuery, tagsQuery } from '../lib/api';
 import { requestNotificationPermission } from '../lib/notifications';
@@ -64,6 +68,20 @@ export function RecordForm({
   const [state, setState] = useState(initial);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const submit = useMutation({ mutationFn: onSubmit });
+  const navigation = useNavigation();
+  // 有未保存的修改时，返回前先确认；保存成功后由调用方离开，不再拦截。
+  usePreventRemove(
+    isRecordFormDirty(initial, state) && !submit.isPending && !submit.isSuccess,
+    ({ data }) =>
+      Alert.alert('放弃修改？', DISCARD_CHANGES_MESSAGE, [
+        { text: '继续编辑', style: 'cancel' },
+        {
+          text: '放弃',
+          style: 'destructive',
+          onPress: () => navigation.dispatch(data.action),
+        },
+      ]),
+  );
 
   const clearError = (field: string) =>
     setFieldErrors((current) => {
@@ -504,7 +522,7 @@ function ChecklistItemsEditor({
         </View>
       ))}
       <Text style={[theme.type['type.caption'], { color: theme.color.textTertiary }]}>
-        分组可以不填；数量和单位可以在 Web 上补充。
+        分组可以不填；数量和单位可以保存后在详情里修改。
       </Text>
     </View>
   );

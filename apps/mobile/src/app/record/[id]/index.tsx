@@ -19,10 +19,10 @@ import {
   IMPORTANT_DATE_KIND_LABELS,
   type LifeRecord,
   nextImportantDate,
-  nextPendingDate,
   type Occurrence,
   RECORD_TYPE_LABELS,
   describeTrashExpiry,
+  recentOccurrences,
   STOCK_KIND_LABELS,
   todayIn,
   zonedDateTime,
@@ -369,8 +369,6 @@ const OCCURRENCE_TONES = {
   completed: 'success',
   skipped: 'neutral',
 } as const;
-/** 未来的实例只列出最近几次。 */
-const UPCOMING_COUNT = 3;
 
 function RecentOccurrences({
   recordId,
@@ -401,10 +399,7 @@ function RecentOccurrences({
   if (list.data === undefined) {
     return null;
   }
-  const items = [
-    ...list.data.items.filter((item) => item.date <= today),
-    ...list.data.items.filter((item) => item.date > today).slice(0, UPCOMING_COUNT),
-  ];
+  const items = recentOccurrences(list.data.items, today);
   if (items.length === 0) {
     return null;
   }
@@ -613,14 +608,33 @@ function ChecklistSection({
                   </Text>
                 </Pressable>
                 {readOnly ? null : (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`删除 ${item.title}`}
-                    hitSlop={8}
-                    onPress={() => remove.mutate(item.id)}
-                  >
-                    <Ionicons name="close" size={20} color={theme.color.textTertiary} />
-                  </Pressable>
+                  <>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`编辑 ${item.title}`}
+                      hitSlop={8}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/record/[id]/item/[itemId]',
+                          params: { id: record.id, itemId: item.id },
+                        })
+                      }
+                    >
+                      <Ionicons
+                        name="create-outline"
+                        size={20}
+                        color={theme.color.textTertiary}
+                      />
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`删除 ${item.title}`}
+                      hitSlop={8}
+                      onPress={() => remove.mutate(item.id)}
+                    >
+                      <Ionicons name="close" size={20} color={theme.color.textTertiary} />
+                    </Pressable>
+                  </>
                 )}
               </View>
             );
@@ -880,17 +894,11 @@ const styles = StyleSheet.create({
   },
 });
 
-/** “下次：……”：按查到的实例计算，改期和已处理的都考虑在内。 */
+/** “下次：……”：服务端已按改期和处理状态算好。 */
 function NextOccurrence({ record, today }: { record: LifeRecord; today: string }) {
-  const until = addDays(today, 14);
-  // 与“最近”列表使用同一个查询，不会重复请求。
-  const list = useQuery({
-    ...occurrencesQuery(record.id, addDays(today, -14), until),
-    enabled: record.deletedAt === null,
-  });
   if (record.recurring === null) {
     return null;
   }
-  const next = nextPendingDate(record.recurring, list.data?.items, today, until);
+  const next = record.nextOccurrenceDate;
   return <>{next === null ? '已结束' : `下次：${describeLocalDate(next, today)}`}</>;
 }
