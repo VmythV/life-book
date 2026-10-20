@@ -1,6 +1,6 @@
 # 数据模型
 
-> 下面的 SQL 只用来说明设计。实现后以 `apps/server/src/db/schema/` 中的 Drizzle schema 和生成的迁移文件为准，改表时同步更新本文。
+> 下面的 SQL 只用来说明设计。实现后以 `apps/server/src/db/schema.ts` 中的 Drizzle schema 和生成的迁移文件为准，改表时同步更新本文。
 
 ## 1. 通用约定
 
@@ -111,11 +111,13 @@ create table records (
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
   unique (id, user_id),
+  -- 删除分类前由服务层先清空记录的 category_id（V1 的分类管理）；
+  -- Drizzle 不支持只置空复合外键中的一列，所以这里不用 on delete set null。
   foreign key (category_id, user_id) references categories(id, user_id)
-    on delete set null (category_id)
 );
 create index records_user_type on records (user_id, type) where deleted_at is null;
-create index records_user_updated on records (user_id, updated_at desc);
+-- 列表按“置顶、修改时间、id”倒序，游标分页也用这三个字段。
+create index records_user_list on records (user_id, is_pinned desc, updated_at desc, id desc);
 
 create table record_tags (
   user_id    uuid not null references users(id) on delete cascade,
@@ -147,12 +149,13 @@ create table recurring_rules (
   foreign key (record_id, user_id) references records(id, user_id) on delete cascade
 );
 
-create table occurrences (               -- 只保存已处理的周期实例
+create table occurrences (               -- 只保存已处理或改期过的周期实例
   id              uuid primary key default uuidv7(),
   user_id         uuid not null references users(id) on delete cascade,
   record_id       uuid not null,
-  occurrence_date date not null,
-  status          text not null check (status in ('completed', 'skipped')),
+  occurrence_date date not null,          -- 原定日期
+  status          text not null check (status in ('pending', 'completed', 'skipped')),
+  rescheduled_to  date,                   -- “仅本次改期”后的日期；pending 时必填
   handled_at      timestamptz not null default now(),
   note            text,
   created_at      timestamptz not null default now(),
@@ -167,7 +170,7 @@ create table occurrences (               -- 只保存已处理的周期实例
 - “撤销完成或跳过”就是删除对应的 `occurrences` 行。
 - 修改规则时把 `start_date` 设为新规则开始的日期（默认今天）。在此之前已完成或已跳过的行保留不变；在此之前未处理的实例不再显示为逾期。
 - 逾期最多回看 30 天，同一事项的多次逾期在“今天”合并为一张卡片。
-- “仅本次改期”放到 V1，届时给 `occurrences` 加 `rescheduled_to` 和 `pending` 状态。
+- “仅本次改期”（见 D-016）：在原定日期那一行写入 `pending` 和 `rescheduled_to`。“今天”、逾期和提醒都按实际日期（`rescheduled_to ?? occurrence_date`）计算；撤销完成或跳过时，改期过的回到 `pending`，否则删除这一行；取消改期时删除 `pending` 行或清空 `rescheduled_to`。改期最多前后 60 天。
 
 ### 4.2 重要日期
 
@@ -259,12 +262,10 @@ create table checklist_items (
   is_done           boolean not null default false,
   done_at           timestamptz,
   sort_order        integer not null default 0,
-  household_item_id uuid,                -- 采购清单里关联的家庭物品
+  household_item_id uuid references records(id) on delete set null,  -- 采购清单里关联的家庭物品，归属由服务层校验
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now(),
-  foreign key (record_id, user_id) references records(id, user_id) on delete cascade,
-  foreign key (household_item_id, user_id) references records(id, user_id)
-    on delete set null (household_item_id)
+  foreign key (record_id, user_id) references records(id, user_id) on delete cascade
 );
 -- 同一物品在同一清单里最多一条未完成的采购项
 create unique index checklist_items_active_purchase
@@ -316,3 +317,11 @@ MVP 直接对 `records.title`、`records.notes` 做 `ILIKE '%关键词%'`（V1 �
 - **附件**：`attachments` 表加对象存储（S3 兼容）。
 - **设备与推送**：`devices` 表保存推送令牌。
 - **家庭共享**：新增 `spaces`、`space_members`，在需要共享的表上加 `space_id`。`user_id` 保持“创建者或归属者”的含义，查询条件从“`user_id` 等于我”扩展为“我所在的空间”。
+
+## 8. 已实现的补充说明（V1）
+
+- 清单项目的增删改只更新记录的 `updated_at`，不改 `version`（见 D-018）；“全部完成”只改状态不同的项目，已勾选的保留原来的 `done_at`。
+- 新建家庭物品时写入一条 `opening` 流水；`low_stock_since` 在期初就低库存时也会写入。低库存提醒的去重见 D-017。
+- 删除分类前先把记录的 `category_id` 置空；删除标签时 `record_tags` 级联删除。新分类的 `sort_order` 排在最后。
+- 回收站超过 30 天的记录由服务端每天清理（见 D-019）。
+- 删除账号时删除 `users` 一行，其余表全部按 `user_id` 级联删除。
