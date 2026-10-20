@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { ApiError, createApiClient } from './client';
+import { ApiError, createApiClient, normalizeServerUrl } from './client';
 
 const user = {
   id: '01a15256-d783-72e5-8e2d-150e2e1c647e',
@@ -144,5 +144,44 @@ describe('createApiClient', () => {
     });
 
     await expect(client.me.get()).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+  });
+});
+
+describe('normalizeServerUrl', () => {
+  it('adds the scheme and drops paths and trailing slashes', () => {
+    expect(normalizeServerUrl(' 192.168.1.5:8787 ')).toBe('http://192.168.1.5:8787');
+    expect(normalizeServerUrl('http://192.168.1.5:8787/')).toBe(
+      'http://192.168.1.5:8787',
+    );
+    expect(normalizeServerUrl('https://book.example.com/api')).toBe(
+      'https://book.example.com',
+    );
+  });
+
+  it('rejects empty and non-http addresses', () => {
+    expect(normalizeServerUrl('')).toBeNull();
+    expect(normalizeServerUrl('ftp://192.168.1.5')).toBeNull();
+    expect(normalizeServerUrl('http://')).toBeNull();
+  });
+});
+
+describe('dynamic base url', () => {
+  it('reads the base url on every request', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(() =>
+      Promise.resolve(jsonResponse(200, { user, settings: null })),
+    );
+    let baseUrl = 'http://a:8787';
+    const client = createApiClient({
+      baseUrl: () => baseUrl,
+      auth: { mode: 'cookie' },
+      fetch,
+    });
+    await client.me.get().catch(() => undefined);
+    baseUrl = 'http://b:8787';
+    await client.me.get().catch(() => undefined);
+    expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
+      'http://a:8787/api/v1/me',
+      'http://b:8787/api/v1/me',
+    ]);
   });
 });

@@ -87,8 +87,11 @@ export type ApiAuth =
   | { mode: 'token'; getToken: () => string | null | Promise<string | null> };
 
 export interface ApiClientOptions {
-  /** 服务端地址；Web 通过开发代理同源访问时为空字符串。 */
-  baseUrl: string;
+  /**
+   * 服务端地址；Web 同源访问时为空字符串。
+   * 传函数时每次请求都重新读取，手机上修改服务器地址后不用重建客户端。
+   */
+  baseUrl: string | (() => string);
   auth: ApiAuth;
   fetch?: typeof fetch;
   /** 会话失效（401 UNAUTHENTICATED）时调用，用于跳转到登录页。 */
@@ -134,7 +137,9 @@ export function createApiClient(options: ApiClientOptions) {
 
     let response: Response;
     try {
-      response = await fetchImpl(`${options.baseUrl}${path}`, {
+      const baseUrl =
+        typeof options.baseUrl === 'function' ? options.baseUrl() : options.baseUrl;
+      response = await fetchImpl(`${baseUrl}${path}`, {
         method,
         headers,
         credentials: options.auth.mode === 'cookie' ? 'include' : 'omit',
@@ -405,6 +410,27 @@ export function isApiError(error: unknown, code?: ClientErrorCode): error is Api
 /** 给用户看的错误文案；服务端的 message 已经是可直接展示的中文。 */
 export function describeError(error: unknown): string {
   return isApiError(error) ? error.message : '出了点问题，请稍后再试';
+}
+
+/**
+ * 整理用户输入的服务端地址：补上 `http://`，去掉路径和末尾的斜杠。
+ * 不是 http 或 https 地址时返回 `null`。
+ */
+export function normalizeServerUrl(input: string): string | null {
+  const text = input.trim();
+  if (text === '') {
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
+  } catch {
+    return null;
+  }
+  if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.hostname === '') {
+    return null;
+  }
+  return url.origin;
 }
 
 /** 导出全部数据的地址；Web 直接用它下载文件。 */
