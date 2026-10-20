@@ -5,6 +5,7 @@ import { meQuery } from '../queries';
 
 const navItems = [
   { to: '/', label: '今天', exact: true },
+  { to: '/calendar', label: '日历', exact: true },
   { to: '/book', label: '生活簿', exact: false },
   { to: '/home', label: '家中', exact: true },
   { to: '/templates', label: '清单模板', exact: false },
@@ -18,13 +19,16 @@ export function AppLayout() {
     <div className="min-h-screen md:flex">
       <aside className="border-b border-line bg-surface md:flex md:w-56 md:flex-col md:border-r md:border-b-0">
         <div className="px-5 pt-5 pb-3 text-lg font-semibold text-brand">生活有谱</div>
-        <nav aria-label="主导航" className="flex gap-1 px-3 pb-3 md:flex-col">
+        <nav
+          aria-label="主导航"
+          className="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:overflow-visible"
+        >
           {navItems.map((item) => (
             <Link
               key={item.to}
               to={item.to}
               activeOptions={{ exact: item.exact, includeSearch: false }}
-              className="rounded-lg px-3 py-2 text-sm font-semibold text-fg-muted hover:bg-surface-subtle"
+              className="rounded-lg px-2.5 py-2 text-sm font-semibold whitespace-nowrap text-fg-muted hover:bg-surface-subtle md:px-3"
               activeProps={{ className: 'bg-surface-subtle !text-fg' }}
             >
               {item.label}

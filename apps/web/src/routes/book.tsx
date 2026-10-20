@@ -42,25 +42,26 @@ export interface BookSearch {
 
 const STATUS_LABELS = { active: '全部', archived: '已归档', trash: '回收站' } as const;
 
+/**
+ * 不合法的参数显式设为 undefined：父路由不校验查询参数，原始值会和这里的结果合并，
+ * 只是不返回某个键的话，原始值（如 `?type=foo`）还会留在 search 里。
+ */
 export function validateBookSearch(search: Record<string, unknown>): BookSearch {
   const text = (value: unknown) =>
     typeof value === 'string' && value !== '' ? value : undefined;
-  const result: BookSearch = {};
-  const id = text(search.id);
   const type = text(search.type);
-  const categoryId = text(search.categoryId);
-  const tagId = text(search.tagId);
-  const q = text(search.q);
   const status = text(search.status);
-  if (id !== undefined) result.id = id;
-  if (type !== undefined && (creatableRecordTypes as readonly string[]).includes(type)) {
-    result.type = type as RecordType;
-  }
-  if (categoryId !== undefined) result.categoryId = categoryId;
-  if (tagId !== undefined) result.tagId = tagId;
-  if (q !== undefined) result.q = q;
-  if (status === 'archived' || status === 'trash') result.status = status;
-  return result;
+  return {
+    id: text(search.id),
+    type:
+      type !== undefined && (creatableRecordTypes as readonly string[]).includes(type)
+        ? (type as RecordType)
+        : undefined,
+    categoryId: text(search.categoryId),
+    tagId: text(search.tagId),
+    q: text(search.q),
+    status: status === 'archived' || status === 'trash' ? status : undefined,
+  };
 }
 
 export function BookPage() {
@@ -96,19 +97,7 @@ export function BookPage() {
               回收站里的记录保留 30 天，之后会自动永久删除。
             </p>
           ) : null}
-          <RecordList
-            // 筛选条件变化时清空已选的记录。
-            key={[
-              search.type,
-              search.categoryId,
-              search.tagId,
-              search.q,
-              search.status,
-            ].join('|')}
-            search={search}
-            today={today}
-            timeZone={me.settings.timezone}
-          />
+          <RecordList search={search} today={today} timeZone={me.settings.timezone} />
         </div>
         <div className={search.id === undefined ? 'hidden md:block' : ''}>
           {search.id === undefined ? (
@@ -259,7 +248,11 @@ function RecordList({
   };
   const list = useInfiniteQuery(recordListQuery(query));
   const records = list.data?.pages.flatMap((page) => page.items) ?? [];
+  // 已选的记录跨筛选条件保留（如边输入搜索词边勾选）；批量操作只针对当前列表里看得到的。
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const chosen = records
+    .filter((record) => selected.has(record.id))
+    .map((record) => record.id);
   const toggle = (id: string) =>
     setSelected((current) => {
       const next = new Set(current);
@@ -287,9 +280,9 @@ function RecordList({
   }
   return (
     <div className="flex flex-col gap-3">
-      {selected.size === 0 ? null : (
+      {chosen.length === 0 ? null : (
         <BatchBar
-          ids={[...selected]}
+          ids={chosen}
           trash={search.status === 'trash'}
           archived={search.status === 'archived'}
           onDone={() => setSelected(new Set())}

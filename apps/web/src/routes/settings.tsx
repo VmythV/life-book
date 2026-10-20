@@ -42,7 +42,7 @@ export function SettingsPage() {
           <dd>{data.user.username}</dd>
           <dt className="text-fg-muted">显示名称</dt>
           <dd>{data.user.displayName ?? '未设置'}</dd>
-          <dt className="text-fg-muted">注册时间</dt>
+          <dt className="text-fg-muted">创建时间</dt>
           <dd>{joinedAt}</dd>
         </dl>
       </Card>

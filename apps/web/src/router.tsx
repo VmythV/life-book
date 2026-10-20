@@ -13,11 +13,11 @@ import { queryClient } from './api';
 import { meQuery } from './queries';
 import { AppLayout } from './routes/app-layout';
 import { BookPage, validateBookSearch } from './routes/book';
+import { CalendarPage, validateCalendarSearch } from './routes/calendar';
 import { HomePage } from './routes/home';
 import { LoginPage } from './routes/login';
 import { NotFoundPage } from './routes/not-found';
 import { EditRecordPage, NewRecordPage } from './routes/record-edit';
-import { RegisterPage } from './routes/register';
 import { RouteError } from './routes/route-error';
 import { SettingsPage } from './routes/settings';
 import { TemplatesPage, validateTemplatesSearch } from './routes/templates';
@@ -52,13 +52,6 @@ const loginRoute = createRoute({
   component: LoginPage,
 });
 
-const registerRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/register',
-  validateSearch: authSearch,
-  component: RegisterPage,
-});
-
 /** 需要登录的页面都挂在这个布局下。 */
 const appRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -80,6 +73,13 @@ const todayRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/',
   component: TodayPage,
+});
+
+const calendarRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/calendar',
+  validateSearch: validateCalendarSearch,
+  component: CalendarPage,
 });
 
 const bookRoute = createRoute({
@@ -127,9 +127,9 @@ const settingsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  registerRoute,
   appRoute.addChildren([
     todayRoute,
+    calendarRoute,
     bookRoute,
     newRecordRoute,
     editRecordRoute,

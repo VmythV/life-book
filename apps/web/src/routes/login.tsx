@@ -1,7 +1,7 @@
 import { describeError, queryKeys } from '@life-book/api-client';
 import { type FieldErrors, loginRequestSchema, validateFields } from '@life-book/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link, useRouter, useSearch } from '@tanstack/react-router';
+import { useRouter, useSearch } from '@tanstack/react-router';
 import { type FormEvent, useState } from 'react';
 
 import { api } from '../api';
@@ -57,10 +57,7 @@ export function LoginPage() {
           登录
         </Button>
         <p className="text-center text-sm text-fg-muted">
-          还没有账号？
-          <Link to="/register" search={search} className="font-semibold text-link">
-            注册
-          </Link>
+          还没有账号？请联系管理员开通。
         </p>
       </form>
     </AuthLayout>
