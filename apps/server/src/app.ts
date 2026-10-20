@@ -1,3 +1,4 @@
+import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
 
@@ -39,6 +40,20 @@ export function createApp(deps: AppDeps) {
   app.route('/api/v1/templates', templateRoutes(deps));
   app.route('/api/v1/today', todayRoutes(deps));
   app.route('/api/v1/reminders', reminderRoutes(deps));
+
+  if (deps.webDistDir !== undefined) {
+    const root = deps.webDistDir;
+    const files = serveStatic({ root });
+    // Web 用前端路由，找不到文件的页面地址都返回 index.html。
+    const page = serveStatic({ root, path: 'index.html' });
+    app.get('*', async (c, next) => {
+      if (c.req.path.startsWith('/api/')) {
+        return next();
+      }
+      const file = await files(c, () => Promise.resolve());
+      return file ?? page(c, next);
+    });
+  }
 
   return app;
 }

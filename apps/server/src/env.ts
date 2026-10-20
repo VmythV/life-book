@@ -11,6 +11,8 @@ const envSchema = z.object({
     .default('postgres://lifebook:lifebook@localhost:5432/life_book_test'),
   PORT: z.coerce.number().int().min(1).max(65535).default(8787),
   HOST: z.string().default('0.0.0.0'),
+  /** 设置后同时提供构建好的 Web 页面，如 `../web/dist`。 */
+  WEB_DIST_DIR: z.string().optional(),
   SECURE_COOKIES: z
     .enum(['true', 'false'])
     .default('false')
