@@ -1,7 +1,12 @@
 import { type LifeRecord, type RecordListResponse } from '@life-book/core';
 import { describe, expect, it } from 'vitest';
 
-import { registerUser, request, setupTestDatabase, type TestApp } from '../test/harness';
+import {
+  createTestUser,
+  request,
+  setupTestDatabase,
+  type TestApp,
+} from '../test/harness';
 
 const { createTestApp } = setupTestDatabase();
 
@@ -21,7 +26,7 @@ const weeklyRule = {
 async function setup() {
   let now = NOW;
   const app = createTestApp({ now: () => now });
-  const { cookie } = await registerUser(app);
+  const { cookie } = await createTestUser(app);
   return {
     app,
     cookie,
@@ -150,7 +155,7 @@ describe('POST /api/v1/records', () => {
     const { app, cookie } = await setup();
     const id = '0199f3a2-8c1e-7b4a-9d2e-1f0a3b4c5d6e';
     await createRecord(app, cookie, { id, type: 'memo', title: 'mine' });
-    const bob = await registerUser(app, 'bob');
+    const bob = await createTestUser(app, 'bob');
 
     const response = await request(app, 'POST', '/api/v1/records', {
       cookie: bob.cookie,

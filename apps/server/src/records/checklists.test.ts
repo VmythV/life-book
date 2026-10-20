@@ -1,7 +1,12 @@
 import { type LifeRecord, type TodayResponse } from '@life-book/core';
 import { describe, expect, it } from 'vitest';
 
-import { registerUser, request, setupTestDatabase, type TestApp } from '../test/harness';
+import {
+  createTestUser,
+  request,
+  setupTestDatabase,
+  type TestApp,
+} from '../test/harness';
 
 const { createTestApp } = setupTestDatabase();
 
@@ -11,7 +16,7 @@ const NOW = new Date('2026-10-19T02:00:00Z');
 async function setup() {
   let now = NOW;
   const app = createTestApp({ now: () => now });
-  const { cookie } = await registerUser(app);
+  const { cookie } = await createTestUser(app);
   return {
     app,
     cookie,
@@ -244,7 +249,7 @@ describe('checklists', () => {
     const { app, cookie } = await setup();
     const record = await createChecklist(app, cookie, { items: [{ title: 'a' }] });
     const itemId = record.checklist?.items[0]?.id ?? '';
-    const bob = await registerUser(app, 'bob');
+    const bob = await createTestUser(app, 'bob');
     const path = `/api/v1/records/${record.id}/items`;
 
     for (const [method, url, body] of [

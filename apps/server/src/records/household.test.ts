@@ -6,7 +6,12 @@ import {
 } from '@life-book/core';
 import { describe, expect, it } from 'vitest';
 
-import { registerUser, request, setupTestDatabase, type TestApp } from '../test/harness';
+import {
+  createTestUser,
+  request,
+  setupTestDatabase,
+  type TestApp,
+} from '../test/harness';
 
 const { createTestApp } = setupTestDatabase();
 
@@ -15,7 +20,7 @@ const NOW = new Date('2026-10-19T02:00:00Z');
 async function setup() {
   let now = NOW;
   const app = createTestApp({ now: () => now });
-  const { cookie } = await registerUser(app);
+  const { cookie } = await createTestUser(app);
   return {
     app,
     cookie,
@@ -262,7 +267,7 @@ describe('household items', () => {
     expect(withReminder.status).toBe(400);
 
     const record = await createItem(app, cookie);
-    const bob = await registerUser(app, 'bob');
+    const bob = await createTestUser(app, 'bob');
     for (const [method, url, body] of [
       ['GET', `/api/v1/records/${record.id}/stock-transactions`, undefined],
       [

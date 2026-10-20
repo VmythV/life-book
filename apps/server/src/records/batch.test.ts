@@ -1,7 +1,12 @@
 import { type LifeRecord } from '@life-book/core';
 import { describe, expect, it } from 'vitest';
 
-import { registerUser, request, setupTestDatabase, type TestApp } from '../test/harness';
+import {
+  createTestUser,
+  request,
+  setupTestDatabase,
+  type TestApp,
+} from '../test/harness';
 
 const { createTestApp } = setupTestDatabase();
 
@@ -22,7 +27,7 @@ async function get(app: TestApp, cookie: string, id: string): Promise<LifeRecord
 describe('POST /api/v1/records/batch', () => {
   it('archives, deletes and restores several records at once', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const ids = [await memo(app, cookie, 'a'), await memo(app, cookie, 'b')];
 
     const archived = await request(app, 'POST', '/api/v1/records/batch', {
@@ -52,7 +57,7 @@ describe('POST /api/v1/records/batch', () => {
 
   it('sets the category and adds tags without removing existing ones', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const category = await request(app, 'POST', '/api/v1/categories', {
       cookie,
       body: { name: '证件' },
@@ -91,8 +96,8 @@ describe('POST /api/v1/records/batch', () => {
 
   it('validates the action payload and skips other users’ records', async () => {
     const app = createTestApp();
-    const alice = await registerUser(app, 'alice');
-    const bob = await registerUser(app, 'bob');
+    const alice = await createTestUser(app, 'alice');
+    const bob = await createTestUser(app, 'bob');
     const id = await memo(app, alice.cookie, 'x');
 
     const missing = await request(app, 'POST', '/api/v1/records/batch', {

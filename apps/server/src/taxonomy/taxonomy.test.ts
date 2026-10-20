@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { registerUser, request, setupTestDatabase } from '../test/harness';
+import { createTestUser, request, setupTestDatabase } from '../test/harness';
 
 const { createTestApp } = setupTestDatabase();
 
 describe('categories and tags', () => {
   it('creates and lists names, returning the existing one for duplicates', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
 
     const created = await request(app, 'POST', '/api/v1/tags', {
       cookie,
@@ -34,7 +34,7 @@ describe('categories and tags', () => {
 
   it('rejects empty names', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const response = await request(app, 'POST', '/api/v1/categories', {
       cookie,
       body: { name: '  ' },
@@ -44,7 +44,7 @@ describe('categories and tags', () => {
 
   it('renames, rejecting names that are already taken', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const home = await request(app, 'POST', '/api/v1/tags', {
       cookie,
       body: { name: '家' },
@@ -68,7 +68,7 @@ describe('categories and tags', () => {
 
   it('deletes a category and clears it from records', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const category = await request(app, 'POST', '/api/v1/categories', {
       cookie,
       body: { name: '证件' },
@@ -88,7 +88,7 @@ describe('categories and tags', () => {
 
   it('deletes a tag and removes it from records', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const tag = await request(app, 'POST', '/api/v1/tags', {
       cookie,
       body: { name: '重要' },
@@ -107,7 +107,7 @@ describe('categories and tags', () => {
 
   it('puts new categories last regardless of their names', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     for (const name of ['b', 'a']) {
       await request(app, 'POST', '/api/v1/categories', { cookie, body: { name } });
     }
@@ -121,7 +121,7 @@ describe('categories and tags', () => {
 
   it('reorders categories, keeping unlisted ones at the end', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const ids: string[] = [];
     for (const name of ['a', 'b', 'c']) {
       const response = await request(app, 'POST', '/api/v1/categories', {
@@ -143,8 +143,8 @@ describe('categories and tags', () => {
 
   it('hides other users’ categories and tags from changes', async () => {
     const app = createTestApp();
-    const alice = await registerUser(app, 'alice');
-    const bob = await registerUser(app, 'bob');
+    const alice = await createTestUser(app, 'alice');
+    const bob = await createTestUser(app, 'bob');
     const tag = await request(app, 'POST', '/api/v1/tags', {
       cookie: alice.cookie,
       body: { name: '家' },

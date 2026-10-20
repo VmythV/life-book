@@ -1,87 +1,53 @@
 import { describe, expect, it } from 'vitest';
 
-import { registerUser, request, sessionCookie, setupTestDatabase } from '../test/harness';
+import {
+  createTestUser,
+  FAST_SCRYPT_PARAMS,
+  request,
+  sessionCookie,
+  setupTestDatabase,
+} from '../test/harness';
+import { createUser, UsernameTakenError } from '../users/create-user';
 
-const { createTestApp } = setupTestDatabase();
+const { createTestApp, db } = setupTestDatabase();
 
-describe('POST /api/v1/auth/register', () => {
-  it('creates the user, normalizes the username and starts a cookie session', async () => {
-    const app = createTestApp();
-    const response = await request(app, 'POST', '/api/v1/auth/register', {
-      body: { username: ' Alice ', password: 'correct horse', displayName: '爱丽丝' },
-    });
-
-    expect(response.status).toBe(201);
-    const body = (await response.json()) as Record<string, unknown>;
-    expect(body).toMatchObject({ user: { username: 'alice', displayName: '爱丽丝' } });
-    expect(body).not.toHaveProperty('token');
-    const setCookie = response.headers.getSetCookie().join('; ');
-    expect(setCookie).toContain('HttpOnly');
-    expect(setCookie).toContain('SameSite=Lax');
-
-    const me = await request(app, 'GET', '/api/v1/me', {
-      cookie: sessionCookie(response),
-    });
-    expect(me.status).toBe(200);
-  });
-
-  it('returns a bearer token instead of a cookie in token mode', async () => {
-    const app = createTestApp();
-    const response = await request(app, 'POST', '/api/v1/auth/register', {
-      body: { username: 'bob', password: 'correct horse' },
-      tokenMode: true,
-    });
-
-    expect(response.status).toBe(201);
-    expect(response.headers.getSetCookie()).toEqual([]);
-    const { token } = (await response.json()) as { token: string };
-    const me = await request(app, 'GET', '/api/v1/me', { token });
-    expect(me.status).toBe(200);
+describe('createUser', () => {
+  it('normalizes the username and keeps the display name', async () => {
+    const user = await createUser(
+      db,
+      { username: ' Alice ', password: 'correct horse', displayName: '爱丽丝' },
+      { now: new Date(), passwordParams: FAST_SCRYPT_PARAMS },
+    );
+    expect(user).toMatchObject({ username: 'alice', displayName: '爱丽丝' });
   });
 
   it('rejects a username that is already taken, ignoring case', async () => {
-    const app = createTestApp();
-    await registerUser(app, 'alice');
-    const response = await request(app, 'POST', '/api/v1/auth/register', {
-      body: { username: 'ALICE', password: 'another password' },
-    });
-
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ error: { code: 'USERNAME_TAKEN' } });
+    const options = { now: new Date(), passwordParams: FAST_SCRYPT_PARAMS };
+    await createUser(db, { username: 'alice', password: 'correct horse' }, options);
+    await expect(
+      createUser(db, { username: 'ALICE', password: 'another password' }, options),
+    ).rejects.toBeInstanceOf(UsernameTakenError);
   });
 
-  it('rejects invalid input with field errors', async () => {
-    const app = createTestApp();
-    const response = await request(app, 'POST', '/api/v1/auth/register', {
-      body: { username: 'a b', password: 'short' },
-    });
-
-    expect(response.status).toBe(400);
-    const body = (await response.json()) as {
-      error: { code: string; details: { fieldErrors: Record<string, unknown> } };
-    };
-    expect(body.error.code).toBe('VALIDATION_FAILED');
-    expect(Object.keys(body.error.details.fieldErrors).sort()).toEqual([
-      'password',
-      'username',
-    ]);
+  it('rejects invalid input', async () => {
+    await expect(
+      createUser(db, { username: 'a b', password: 'short' }, { now: new Date() }),
+    ).rejects.toThrow();
   });
 
-  it('rejects a body that is not JSON', async () => {
+  it('is the only way to create accounts: the register endpoint is gone', async () => {
     const app = createTestApp();
-    const response = await app.request('/api/v1/auth/register', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{not json',
+    const response = await request(app, 'POST', '/api/v1/auth/register', {
+      body: { username: 'mallory', password: 'correct horse' },
     });
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(404);
   });
 });
 
 describe('POST /api/v1/auth/login', () => {
   it('logs in with the right password, ignoring username case', async () => {
     const app = createTestApp();
-    await registerUser(app, 'alice', 'correct horse');
+    await createTestUser(app, 'alice', 'correct horse');
     const response = await request(app, 'POST', '/api/v1/auth/login', {
       body: { username: 'Alice', password: 'correct horse' },
     });
@@ -89,6 +55,34 @@ describe('POST /api/v1/auth/login', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ user: { username: 'alice' } });
     expect(sessionCookie(response)).toMatch(/^lb_session=.+/);
+    const setCookie = response.headers.getSetCookie().join('; ');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('SameSite=Lax');
+  });
+
+  it('returns a bearer token instead of a cookie in token mode', async () => {
+    const app = createTestApp();
+    await createTestUser(app, 'bob', 'correct horse');
+    const response = await request(app, 'POST', '/api/v1/auth/login', {
+      body: { username: 'bob', password: 'correct horse' },
+      tokenMode: true,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.getSetCookie()).toEqual([]);
+    const { token } = (await response.json()) as { token: string };
+    const me = await request(app, 'GET', '/api/v1/me', { token });
+    expect(me.status).toBe(200);
+  });
+
+  it('rejects a body that is not JSON', async () => {
+    const app = createTestApp();
+    const response = await app.request('/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{not json',
+    });
+    expect(response.status).toBe(400);
   });
 
   it.each([
@@ -96,7 +90,7 @@ describe('POST /api/v1/auth/login', () => {
     ['an unknown username', 'nobody', 'correct horse'],
   ])('gives the same answer for %s', async (_case, username, password) => {
     const app = createTestApp();
-    await registerUser(app, 'alice', 'correct horse');
+    await createTestUser(app, 'alice', 'correct horse');
     const response = await request(app, 'POST', '/api/v1/auth/login', {
       body: { username, password },
     });
@@ -109,7 +103,7 @@ describe('POST /api/v1/auth/login', () => {
 
   it('blocks a username after 10 failed attempts', async () => {
     const app = createTestApp();
-    await registerUser(app, 'alice', 'correct horse');
+    await createTestUser(app, 'alice', 'correct horse');
     const attempt = (password: string) =>
       request(app, 'POST', '/api/v1/auth/login', {
         body: { username: 'alice', password },
@@ -138,7 +132,7 @@ describe('sessions', () => {
 
   it('ends the session on logout', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
 
     const logout = await request(app, 'POST', '/api/v1/auth/logout', { cookie });
     expect(logout.status).toBe(204);
@@ -150,7 +144,7 @@ describe('sessions', () => {
 
   it('expires a session after 30 days without use', async () => {
     const start = new Date('2026-10-01T00:00:00Z');
-    const { cookie } = await registerUser(createTestApp({ now: () => start }));
+    const { cookie } = await createTestUser(createTestApp({ now: () => start }));
 
     const later = new Date('2026-10-31T00:00:01Z');
     const response = await request(
@@ -166,7 +160,7 @@ describe('sessions', () => {
 
   it('extends a session that is still in use', async () => {
     const start = new Date('2026-10-01T00:00:00Z');
-    const { cookie } = await registerUser(createTestApp({ now: () => start }));
+    const { cookie } = await createTestUser(createTestApp({ now: () => start }));
 
     const day20 = new Date('2026-10-21T00:00:00Z');
     const renewed = await request(
@@ -196,7 +190,7 @@ describe('sessions', () => {
 describe('POST /api/v1/auth/change-password', () => {
   it('changes the password and signs out other sessions only', async () => {
     const app = createTestApp();
-    const { cookie: current } = await registerUser(app, 'alice', 'correct horse');
+    const { cookie: current } = await createTestUser(app, 'alice', 'correct horse');
     const otherLogin = await request(app, 'POST', '/api/v1/auth/login', {
       body: { username: 'alice', password: 'correct horse' },
     });
@@ -223,7 +217,7 @@ describe('POST /api/v1/auth/change-password', () => {
 
   it('rejects a wrong current password without ending the session', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app, 'alice', 'correct horse');
+    const { cookie } = await createTestUser(app, 'alice', 'correct horse');
     const response = await request(app, 'POST', '/api/v1/auth/change-password', {
       cookie,
       body: { currentPassword: 'not it', newPassword: 'battery staple' },

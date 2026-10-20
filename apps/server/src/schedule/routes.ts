@@ -1,6 +1,8 @@
 import {
   addDays,
+  buildCalendar,
   buildToday,
+  calendarQuerySchema,
   OVERDUE_LOOKBACK_DAYS,
   computeLowStockAlerts,
   checklistProgress,
@@ -12,6 +14,7 @@ import {
   type LocalDate,
   todayIn,
   todayQuerySchema,
+  type TodayInput,
   upcomingRemindersQuerySchema,
   type UpcomingRemindersResponse,
 } from '@life-book/core';
@@ -80,6 +83,69 @@ async function loadScheduleRecords(
   return { items, stored };
 }
 
+/** “今天”和日历共用的输入：重复日常、重要日期、有截止时间的清单和备忘提醒。 */
+function scheduleInput(
+  items: readonly LifeRecord[],
+  stored: ReadonlyMap<string, ReadonlyMap<LocalDate, StoredOccurrence>>,
+): Pick<TodayInput, 'recurring' | 'importantDates' | 'checklists' | 'memoReminders'> {
+  return {
+    recurring: items.flatMap((record) =>
+      record.recurring === null
+        ? []
+        : [
+            {
+              recordId: record.id,
+              title: displayTitle(record),
+              rule: record.recurring,
+              stored: stored.get(record.id) ?? new Map(),
+            },
+          ],
+    ),
+    importantDates: items.flatMap((record) =>
+      record.importantDate === null
+        ? []
+        : [
+            {
+              recordId: record.id,
+              title: displayTitle(record),
+              value: record.importantDate,
+            },
+          ],
+    ),
+    checklists: items.flatMap((record) => {
+      if (record.checklist?.dueAt == null) {
+        return [];
+      }
+      const progress = checklistProgress(record.checklist.items);
+      return [
+        {
+          recordId: record.id,
+          title: displayTitle(record),
+          dueAt: new Date(record.checklist.dueAt),
+          done: progress.done,
+          total: progress.total,
+        },
+      ];
+    }),
+    memoReminders: items.flatMap((record) =>
+      record.type !== 'memo'
+        ? []
+        : record.reminders.flatMap((reminder) =>
+            reminder.kind === 'absolute' && reminder.enabled
+              ? [
+                  {
+                    recordId: record.id,
+                    title: displayTitle(record),
+                    reminderId: reminder.id,
+                    fireAt: new Date(reminder.fireAt),
+                  },
+                ]
+              : [],
+          ),
+    ),
+  };
+}
+
 export function todayRoutes(deps: AppDeps) {
   return new Hono<AppEnv>().use(requireAuth(deps)).get('/', async (c) => {
     const { userId } = c.get('auth');
@@ -98,29 +164,7 @@ export function todayRoutes(deps: AppDeps) {
       buildToday({
         date,
         timeZone: settings.timezone,
-        recurring: items.flatMap((record) =>
-          record.recurring === null
-            ? []
-            : [
-                {
-                  recordId: record.id,
-                  title: displayTitle(record),
-                  rule: record.recurring,
-                  stored: stored.get(record.id) ?? new Map(),
-                },
-              ],
-        ),
-        importantDates: items.flatMap((record) =>
-          record.importantDate === null
-            ? []
-            : [
-                {
-                  recordId: record.id,
-                  title: displayTitle(record),
-                  value: record.importantDate,
-                },
-              ],
-        ),
+        ...scheduleInput(items, stored),
         lowStock: items.flatMap((record) => {
           const item = record.householdItem;
           if (item === null || !item.isLowStock || item.lowStockThreshold === null) {
@@ -137,37 +181,30 @@ export function todayRoutes(deps: AppDeps) {
             },
           ];
         }),
-        checklists: items.flatMap((record) => {
-          if (record.checklist?.dueAt == null) {
-            return [];
-          }
-          const progress = checklistProgress(record.checklist.items);
-          return [
-            {
-              recordId: record.id,
-              title: displayTitle(record),
-              dueAt: new Date(record.checklist.dueAt),
-              done: progress.done,
-              total: progress.total,
-            },
-          ];
-        }),
-        memoReminders: items.flatMap((record) =>
-          record.type !== 'memo'
-            ? []
-            : record.reminders.flatMap((reminder) =>
-                reminder.kind === 'absolute' && reminder.enabled
-                  ? [
-                      {
-                        recordId: record.id,
-                        title: displayTitle(record),
-                        reminderId: reminder.id,
-                        fireAt: new Date(reminder.fireAt),
-                      },
-                    ]
-                  : [],
-              ),
-        ),
+      }),
+    );
+  });
+}
+
+export function calendarRoutes(deps: AppDeps) {
+  return new Hono<AppEnv>().use(requireAuth(deps)).get('/', async (c) => {
+    const { userId } = c.get('auth');
+    const query = readQuery(c, calendarQuerySchema);
+    const settings = await loadSettings(deps.db, userId);
+    // 改期最多移动 60 天：原定日期在区间前 60 天内的实例也可能移进来。
+    const { items, stored } = await loadScheduleRecords(
+      deps.db,
+      userId,
+      addDays(query.from, -MAX_RESCHEDULE_DAYS),
+      deps.now(),
+    );
+    return c.json(
+      buildCalendar({
+        from: query.from,
+        to: query.to,
+        today: todayIn(settings.timezone, deps.now()),
+        timeZone: settings.timezone,
+        ...scheduleInput(items, stored),
       }),
     );
   });

@@ -1,7 +1,12 @@
 import { type ChecklistTemplate, type LifeRecord } from '@life-book/core';
 import { describe, expect, it } from 'vitest';
 
-import { registerUser, request, setupTestDatabase, type TestApp } from '../test/harness';
+import {
+  createTestUser,
+  request,
+  setupTestDatabase,
+  type TestApp,
+} from '../test/harness';
 
 const { createTestApp } = setupTestDatabase();
 
@@ -26,7 +31,7 @@ async function createTemplate(app: TestApp, cookie: string): Promise<ChecklistTe
 describe('checklist templates', () => {
   it('creates, lists, updates and deletes templates', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const template = await createTemplate(app, cookie);
     expect(template).toMatchObject({
       title: '出差',
@@ -62,7 +67,7 @@ describe('checklist templates', () => {
 
   it('creates an independent checklist from a template', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const template = await createTemplate(app, cookie);
     const id = '0199f3a2-8c1e-7b4a-9d2e-1f0a3b4c5d6e';
 
@@ -116,7 +121,7 @@ describe('checklist templates', () => {
 
   it('saves a checklist as a template without check marks', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const created = await request(app, 'POST', '/api/v1/records', {
       cookie,
       body: {
@@ -149,8 +154,8 @@ describe('checklist templates', () => {
 
   it('keeps templates private to each user', async () => {
     const app = createTestApp();
-    const alice = await registerUser(app, 'alice');
-    const bob = await registerUser(app, 'bob');
+    const alice = await createTestUser(app, 'alice');
+    const bob = await createTestUser(app, 'bob');
     const template = await createTemplate(app, alice.cookie);
     const path = `/api/v1/templates/${template.id}`;
 

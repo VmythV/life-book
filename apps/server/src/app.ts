@@ -9,7 +9,7 @@ import { meRoutes } from './me/routes';
 import { checklistItemRoutes } from './records/checklist-routes';
 import { householdRoutes } from './records/household-routes';
 import { recordRoutes } from './records/routes';
-import { reminderRoutes, todayRoutes } from './schedule/routes';
+import { calendarRoutes, reminderRoutes, todayRoutes } from './schedule/routes';
 import { categoryRoutes, tagRoutes } from './taxonomy/routes';
 import { templateRoutes } from './templates/routes';
 
@@ -39,6 +39,7 @@ export function createApp(deps: AppDeps) {
   app.route('/api/v1/tags', tagRoutes(deps));
   app.route('/api/v1/templates', templateRoutes(deps));
   app.route('/api/v1/today', todayRoutes(deps));
+  app.route('/api/v1/calendar', calendarRoutes(deps));
   app.route('/api/v1/reminders', reminderRoutes(deps));
 
   if (deps.webDistDir !== undefined) {

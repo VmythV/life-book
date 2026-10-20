@@ -9,6 +9,7 @@
     "serve": "sh scripts/serve.sh",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/scripts/migrate.ts",
+    "create-user": "tsx src/scripts/create-user.ts",
     "reset-password": "tsx src/scripts/reset-password.ts",
     "typecheck": "tsc -p tsconfig.json"
   },

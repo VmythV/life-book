@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { registerUser, request, setupTestDatabase } from '../test/harness';
+import { createTestUser, request, setupTestDatabase } from '../test/harness';
 import { purgeExpiredTrash } from './purge-trash';
 
 const { createTestApp, db } = setupTestDatabase();
@@ -9,7 +9,7 @@ describe('purgeExpiredTrash', () => {
   it('only deletes records that stayed in the trash for more than 30 days', async () => {
     let now = new Date('2026-09-01T00:00:00Z');
     const app = createTestApp({ now: () => now });
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const create = async (title: string) => {
       const response = await request(app, 'POST', '/api/v1/records', {
         cookie,

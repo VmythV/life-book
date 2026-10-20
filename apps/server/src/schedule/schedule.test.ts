@@ -1,7 +1,16 @@
-import { type TodayResponse, type UpcomingRemindersResponse } from '@life-book/core';
+import {
+  type CalendarResponse,
+  type TodayResponse,
+  type UpcomingRemindersResponse,
+} from '@life-book/core';
 import { describe, expect, it } from 'vitest';
 
-import { registerUser, request, setupTestDatabase, type TestApp } from '../test/harness';
+import {
+  createTestUser,
+  request,
+  setupTestDatabase,
+  type TestApp,
+} from '../test/harness';
 
 const { createTestApp } = setupTestDatabase();
 
@@ -56,7 +65,7 @@ async function seed(app: TestApp, cookie: string) {
 describe('GET /api/v1/today', () => {
   it('aggregates overdue, today and upcoming dates in the user’s time zone', async () => {
     const app = createTestApp({ now: () => NOW });
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const { water, birthday, memo } = await seed(app, cookie);
     // 10-15 已完成，10-12 和更早的周一、周四未处理。
     await request(app, 'PUT', `/api/v1/records/${water.id}/occurrences/2026-10-15`, {
@@ -100,7 +109,7 @@ describe('GET /api/v1/today', () => {
 
   it('accepts an explicit date and leaves out archived and deleted records', async () => {
     const app = createTestApp({ now: () => NOW });
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const { water, memo } = await seed(app, cookie);
     await request(app, 'POST', `/api/v1/records/${water.id}/archive`, { cookie });
     await request(app, 'DELETE', `/api/v1/records/${memo.id}`, { cookie });
@@ -118,7 +127,7 @@ describe('GET /api/v1/today', () => {
 describe('GET /api/v1/reminders/upcoming', () => {
   it('lists reminder times for the coming days', async () => {
     const app = createTestApp({ now: () => NOW });
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const { water, birthday, memo } = await seed(app, cookie);
     // 周四的已经提前完成，不再提醒。
     await request(app, 'PUT', `/api/v1/records/${water.id}/occurrences/2026-10-22`, {
@@ -143,7 +152,7 @@ describe('GET /api/v1/reminders/upcoming', () => {
 
   it('uses the default reminder time from the settings', async () => {
     const app = createTestApp({ now: () => NOW });
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     await request(app, 'PATCH', '/api/v1/me/settings', {
       cookie,
       body: { defaultReminderTime: '20:30' },
@@ -155,5 +164,76 @@ describe('GET /api/v1/reminders/upcoming', () => {
     expect(items.find((item) => item.recordId === birthday.id)?.fireAt).toBe(
       '2026-10-23T12:30:00.000Z',
     );
+  });
+});
+
+describe('GET /api/v1/calendar', () => {
+  it('lists what happens on each day of the range', async () => {
+    const app = createTestApp({ now: () => NOW });
+    const { cookie } = await createTestUser(app);
+    const { water, birthday, memo } = await seed(app, cookie);
+    await request(app, 'PUT', `/api/v1/records/${water.id}/occurrences/2026-10-15`, {
+      cookie,
+      body: { status: 'completed' },
+    });
+    await request(
+      app,
+      'PUT',
+      `/api/v1/records/${water.id}/occurrences/2026-10-22/reschedule`,
+      { cookie, body: { to: '2026-10-23' } },
+    );
+
+    const response = await request(
+      app,
+      'GET',
+      '/api/v1/calendar?from=2026-10-12&to=2026-10-25',
+      { cookie },
+    );
+    expect(response.status).toBe(200);
+    const calendar = (await response.json()) as CalendarResponse;
+    expect(calendar.today).toBe('2026-10-19');
+    expect(
+      calendar.items.map((item) => [
+        item.date,
+        item.recordId,
+        item.kind === 'occurrence' ? item.status : item.kind,
+      ]),
+    ).toEqual([
+      ['2026-10-12', water.id, 'overdue'],
+      ['2026-10-15', water.id, 'completed'],
+      ['2026-10-19', water.id, 'pending'],
+      ['2026-10-19', memo.id, 'memo_reminder'],
+      ['2026-10-23', water.id, 'pending'],
+      ['2026-10-24', birthday.id, 'important_date'],
+    ]);
+    expect(calendar.items[4]).toMatchObject({ originalDate: '2026-10-22' });
+    expect(calendar.items[5]).toMatchObject({ counter: 60 });
+
+    // 别人的日历里看不到这些。
+    const other = await createTestUser(app, 'bob');
+    const otherResponse = await request(
+      app,
+      'GET',
+      '/api/v1/calendar?from=2026-10-12&to=2026-10-25',
+      { cookie: other.cookie },
+    );
+    expect(((await otherResponse.json()) as CalendarResponse).items).toEqual([]);
+  });
+
+  it('rejects a missing, reversed or too long range', async () => {
+    const app = createTestApp({ now: () => NOW });
+    const { cookie } = await createTestUser(app);
+    for (const query of [
+      '',
+      '?from=2026-10-25&to=2026-10-12',
+      '?from=2026-10-01&to=2026-12-31',
+    ]) {
+      const response = await request(app, 'GET', `/api/v1/calendar${query}`, { cookie });
+      expect(response.status).toBe(400);
+    }
+    expect(
+      (await request(app, 'GET', '/api/v1/calendar?from=2026-10-12&to=2026-10-25'))
+        .status,
+    ).toBe(401);
   });
 });

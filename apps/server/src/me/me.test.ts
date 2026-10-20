@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
-import { registerUser, request, setupTestDatabase } from '../test/harness';
+import {
+  createTestUser,
+  FAST_SCRYPT_PARAMS,
+  request,
+  setupTestDatabase,
+} from '../test/harness';
+import { createUser } from '../users/create-user';
 
-const { createTestApp } = setupTestDatabase();
+const { createTestApp, db } = setupTestDatabase();
 
 describe('GET /api/v1/me', () => {
   it('returns the current user with default settings', async () => {
     const app = createTestApp();
-    const { cookie, userId } = await registerUser(app, 'alice');
+    const { cookie, userId } = await createTestUser(app, 'alice');
     const response = await request(app, 'GET', '/api/v1/me', { cookie });
 
     expect(response.status).toBe(200);
@@ -26,13 +32,18 @@ describe('GET /api/v1/me', () => {
     });
   });
 
-  it('uses the time zone given at registration', async () => {
+  it('uses the time zone given when the account was created', async () => {
     const app = createTestApp();
-    const register = await request(app, 'POST', '/api/v1/auth/register', {
-      body: { username: 'bob', password: 'correct horse', timezone: 'Europe/Berlin' },
+    await createUser(
+      db,
+      { username: 'bob', password: 'correct horse', timezone: 'Europe/Berlin' },
+      { now: new Date(), passwordParams: FAST_SCRYPT_PARAMS },
+    );
+    const login = await request(app, 'POST', '/api/v1/auth/login', {
+      body: { username: 'bob', password: 'correct horse' },
       tokenMode: true,
     });
-    const { token } = (await register.json()) as { token: string };
+    const { token } = (await login.json()) as { token: string };
     const response = await request(app, 'GET', '/api/v1/me', { token });
 
     expect(await response.json()).toMatchObject({
@@ -42,8 +53,8 @@ describe('GET /api/v1/me', () => {
 
   it('only ever returns the signed-in user', async () => {
     const app = createTestApp();
-    const alice = await registerUser(app, 'alice');
-    const bob = await registerUser(app, 'bob');
+    const alice = await createTestUser(app, 'alice');
+    const bob = await createTestUser(app, 'bob');
 
     const response = await request(app, 'GET', '/api/v1/me', { cookie: bob.cookie });
     const body = (await response.json()) as { user: { id: string } };
@@ -55,7 +66,7 @@ describe('GET /api/v1/me', () => {
 describe('PATCH /api/v1/me/settings', () => {
   it('updates only the given fields', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const response = await request(app, 'PATCH', '/api/v1/me/settings', {
       cookie,
       body: { defaultReminderTime: '20:30' },
@@ -75,7 +86,7 @@ describe('PATCH /api/v1/me/settings', () => {
     { weekStartsOn: 0 },
   ])('rejects %j', async (body) => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app);
+    const { cookie } = await createTestUser(app);
     const response = await request(app, 'PATCH', '/api/v1/me/settings', { cookie, body });
     expect(response.status).toBe(400);
   });
@@ -84,7 +95,7 @@ describe('PATCH /api/v1/me/settings', () => {
 describe('GET /api/v1/me/export', () => {
   it('exports all data of the user as a JSON attachment', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app, 'alice');
+    const { cookie } = await createTestUser(app, 'alice');
     await request(app, 'POST', '/api/v1/tags', { cookie, body: { name: '家' } });
     const memo = await request(app, 'POST', '/api/v1/records', {
       cookie,
@@ -101,7 +112,7 @@ describe('GET /api/v1/me/export', () => {
       },
     });
     // 别人的数据不会被导出。
-    const bob = await registerUser(app, 'bob');
+    const bob = await createTestUser(app, 'bob');
     await request(app, 'POST', '/api/v1/records', {
       cookie: bob.cookie,
       body: { type: 'memo', title: 'bob 的备忘' },
@@ -136,7 +147,7 @@ describe('GET /api/v1/me/export', () => {
 describe('DELETE /api/v1/me', () => {
   it('requires the password and then deletes everything', async () => {
     const app = createTestApp();
-    const { cookie } = await registerUser(app, 'alice', 'correct horse');
+    const { cookie } = await createTestUser(app, 'alice', 'correct horse');
     await request(app, 'POST', '/api/v1/records', {
       cookie,
       body: { type: 'memo', title: '护照' },
@@ -158,7 +169,7 @@ describe('DELETE /api/v1/me', () => {
     expect(after.status).toBe(401);
 
     // 用户名可以重新注册，得到的是全新的空账号。
-    const again = await registerUser(app, 'alice');
+    const again = await createTestUser(app, 'alice');
     const list = await request(app, 'GET', '/api/v1/records', { cookie: again.cookie });
     expect(await list.json()).toEqual({ items: [], nextCursor: null });
   });

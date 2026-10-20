@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { registerUser, request, setupTestDatabase } from '../test/harness';
+import { createTestUser, request, setupTestDatabase } from '../test/harness';
 
 const { createTestApp } = setupTestDatabase();
 
@@ -8,8 +8,8 @@ const { createTestApp } = setupTestDatabase();
 describe('user isolation', () => {
   it('hides every record of another user', async () => {
     const app = createTestApp({ now: () => new Date('2026-10-19T02:00:00Z') });
-    const alice = await registerUser(app, 'alice');
-    const bob = await registerUser(app, 'bob');
+    const alice = await createTestUser(app, 'alice');
+    const bob = await createTestUser(app, 'bob');
 
     const created = await request(app, 'POST', '/api/v1/records', {
       cookie: alice.cookie,
@@ -71,8 +71,8 @@ describe('user isolation', () => {
 
   it('keeps categories and tags per user', async () => {
     const app = createTestApp();
-    const alice = await registerUser(app, 'alice');
-    const bob = await registerUser(app, 'bob');
+    const alice = await createTestUser(app, 'alice');
+    const bob = await createTestUser(app, 'bob');
     const category = await request(app, 'POST', '/api/v1/categories', {
       cookie: alice.cookie,
       body: { name: '证件' },
