@@ -8,6 +8,41 @@
       "when": 1792382711737,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792461366849,
+      "tag": "0001_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792463686863,
+      "tag": "0002_checklists",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792464085794,
+      "tag": "0003_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792464361286,
+      "tag": "0004_household",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792465098252,
+      "tag": "0005_reschedule",
+      "breakpoints": true
     }
   ]
 }

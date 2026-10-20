@@ -4,6 +4,9 @@ import postgres from 'postgres';
 import * as schema from './schema';
 
 export type Database = PostgresJsDatabase<typeof schema>;
+export type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
+/** 既可以是连接，也可以是事务，读写函数都接受这两种。 */
+export type Executor = Database | Transaction;
 
 export interface DatabaseConnection {
   db: Database;
