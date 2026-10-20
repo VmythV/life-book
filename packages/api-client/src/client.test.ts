@@ -121,6 +121,21 @@ describe('createApiClient', () => {
     });
   });
 
+  it('builds query strings and skips unset parameters', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(() =>
+      Promise.resolve(jsonResponse(200, { items: [], nextCursor: null })),
+    );
+    const client = createApiClient({ baseUrl: '', auth: { mode: 'cookie' }, fetch });
+
+    await client.records.list({ type: 'memo', q: '护照', cursor: undefined, limit: 20 });
+    await client.records.list();
+
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/records?type=memo&q=%E6%8A%A4%E7%85%A7&limit=20',
+      '/api/v1/records',
+    ]);
+  });
+
   it('rejects responses that do not match the contract', async () => {
     const client = createApiClient({
       baseUrl: '',

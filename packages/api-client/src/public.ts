@@ -6,6 +6,7 @@ export {
   type ClientErrorCode,
   createApiClient,
   describeError,
+  EXPORT_PATH,
   isApiError,
   queryKeys,
 } from './client';
