@@ -10,6 +10,7 @@ import { useCallback, useState } from 'react';
 import { Alert, Linking, StyleSheet, Text, View } from 'react-native';
 
 import { TimeField } from '../../components/pickers';
+import { ServerAddress } from '../../components/server-address';
 import {
   BodyText,
   Button,
@@ -23,10 +24,12 @@ import {
 } from '../../components/ui';
 import { api, meQuery, useInvalidateRecords } from '../../lib/api';
 import {
+  backgroundRestrictionTip,
   cancelAllNotifications,
   getNotificationPermission,
   type NotificationPermission,
   requestNotificationPermission,
+  scheduleTestNotification,
 } from '../../lib/notifications';
 import { clearPersistedCache } from '../../lib/persist';
 import { session } from '../../lib/session';
@@ -106,6 +109,7 @@ export default function MeScreen() {
           <BodyText muted>状态</BodyText>
           <BodyText>{permission === null ? '…' : PERMISSION_LABELS[permission]}</BodyText>
         </View>
+        {permission === 'granted' ? <ReminderCheck /> : null}
         {permission === 'undetermined' ? (
           <SmallButton
             label="开启通知"
@@ -156,6 +160,7 @@ export default function MeScreen() {
       <Button label="回收站" variant="secondary" onPress={() => router.push('/trash')} />
       <ChangePasswordCard />
       <DeleteAccountCard />
+      <ServerAddress />
       <Button
         label="退出登录"
         variant="secondary"
@@ -174,6 +179,29 @@ const styles = StyleSheet.create({
     gap: 12,
   },
 });
+
+/** 通知已开启时：测试提醒，以及安卓厂商后台限制的设置说明。 */
+function ReminderCheck() {
+  const [scheduled, setScheduled] = useState(false);
+  const tip = backgroundRestrictionTip();
+  return (
+    <>
+      {scheduled ? (
+        <InfoBanner message="已安排，1 分钟后会收到一条“测试提醒”。可以锁屏或从最近任务里划掉应用，看看是否仍能收到。" />
+      ) : null}
+      <SmallButton
+        label="测试提醒（1 分钟后）"
+        onPress={() => void scheduleTestNotification().then(() => setScheduled(true))}
+      />
+      {tip === null ? null : (
+        <>
+          <InfoBanner message={tip} />
+          <SmallButton label="打开应用设置" onPress={() => void Linking.openSettings()} />
+        </>
+      )}
+    </>
+  );
+}
 
 /** 修改密码：成功后其他设备上的登录失效，本机保持登录。 */
 function ChangePasswordCard() {

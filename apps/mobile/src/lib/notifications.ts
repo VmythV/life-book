@@ -144,9 +144,11 @@ async function doSync(): Promise<void> {
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   const wanted = upcoming.items.slice(0, MAX_SCHEDULED);
   const wantedKeys = new Set(wanted.map((item) => item.key));
-  // 稍后提醒是本机临时排的；低库存提醒排好后服务端就不再返回。两者都保留到自己触发。
+  // 稍后提醒和测试提醒是本机临时排的；低库存提醒排好后服务端就不再返回。都保留到自己触发。
   const isLocalOnly = (identifier: string) =>
-    identifier.endsWith(':snooze') || identifier.startsWith('lowstock:');
+    identifier.endsWith(':snooze') ||
+    identifier.startsWith('lowstock:') ||
+    identifier.startsWith(TEST_PREFIX);
 
   for (const request of scheduled) {
     if (!isLocalOnly(request.identifier) && !wantedKeys.has(request.identifier)) {
@@ -185,6 +187,37 @@ async function doSync(): Promise<void> {
       await api.household.lowStockNotified(item.recordId, since).catch(() => undefined);
     }
   }
+}
+
+const TEST_PREFIX = 'test:';
+const TEST_DELAY_SECONDS = 60;
+
+/** “测试提醒”：1 分钟后发一条通知，用来确认锁屏、划掉应用后也能按时收到。 */
+export async function scheduleTestNotification(): Promise<void> {
+  await Notifications.scheduleNotificationAsync({
+    identifier: `${TEST_PREFIX}${Date.now()}`,
+    content: { title: '测试提醒', body: '能看到这条，说明提醒可以按时送达。' },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: new Date(Date.now() + TEST_DELAY_SECONDS * 1000),
+      channelId: CHANNEL_ID,
+    },
+  });
+}
+
+/**
+ * 安卓厂商对后台应用的限制：被划掉或重启后，已排好的提醒可能收不到。
+ * 返回给用户的设置说明；iOS 不需要。
+ */
+export function backgroundRestrictionTip(): string | null {
+  if (Platform.OS !== 'android') {
+    return null;
+  }
+  const manufacturer = Platform.constants.Manufacturer.toLowerCase();
+  if (manufacturer === 'xiaomi') {
+    return '小米手机默认会限制后台应用：请在应用设置里打开“自启动”，并把“省电策略”设为“无限制”，否则划掉应用或重启手机后可能收不到提醒。';
+  }
+  return '部分手机会限制后台应用。如果提醒不准时，请在应用设置里允许自启动，并关闭电池优化。';
 }
 
 /** 退出登录时取消全部通知。 */
