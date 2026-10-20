@@ -287,6 +287,17 @@ export const INTERVAL_UNITS: Record<RecordFormFreq, string> = {
   yearly: '年',
 };
 
+/** 表单是否改过：用来在离开前提醒保存。状态里只有字符串、数字、布尔值和数组，按 JSON 比较即可。 */
+export function isRecordFormDirty(
+  initial: RecordFormState,
+  state: RecordFormState,
+): boolean {
+  return JSON.stringify(initial) !== JSON.stringify(state);
+}
+
+/** 离开有未保存修改的表单时的确认文字。 */
+export const DISCARD_CHANGES_MESSAGE = '修改还没有保存，确定要离开吗？';
+
 /** 提醒区还没有提醒时的说明：这类记录什么时候出现在“今天”里。 */
 export const TODAY_VISIBILITY_HINTS: Record<CreatableRecordType, string> = {
   recurring: '不设提醒也会出现在“今天”里',

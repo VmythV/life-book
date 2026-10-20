@@ -1,11 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
-import { initialRecordFormState, toRecordRequest } from './record-form';
+import {
+  initialRecordFormState,
+  isRecordFormDirty,
+  toRecordRequest,
+} from './record-form';
 import { createRecordRequestSchema, type LifeRecord } from './records';
 
 const base: Omit<
   LifeRecord,
-  'type' | 'recurring' | 'importantDate' | 'checklist' | 'householdItem' | 'reminders'
+  | 'type'
+  | 'recurring'
+  | 'importantDate'
+  | 'checklist'
+  | 'householdItem'
+  | 'reminders'
+  | 'nextOccurrenceDate'
 > = {
   id: '01a15256-d783-72e5-8e2d-150e2e1c6400',
   title: '标题',
@@ -37,6 +47,7 @@ describe('record form model', () => {
       importantDate: null,
       checklist: null,
       householdItem: null,
+      nextOccurrenceDate: '2026-10-19',
       reminders: [
         {
           id: '01a15256-d783-72e5-8e2d-150e2e1c6401',
@@ -94,5 +105,13 @@ describe('record form model', () => {
       toRecordRequest('recurring', state, 'Asia/Shanghai'),
     );
     expect(result.error?.issues[0]?.message).toBe('请填写间隔');
+  });
+
+  it('detects unsaved changes', () => {
+    const initial = initialRecordFormState('memo', '2026-10-19', 'Asia/Shanghai');
+    const state: typeof initial = JSON.parse(JSON.stringify(initial));
+    expect(isRecordFormDirty(initial, state)).toBe(false);
+    state.recurring.byWeekdays = [...state.recurring.byWeekdays, 3];
+    expect(isRecordFormDirty(initial, state)).toBe(true);
   });
 });

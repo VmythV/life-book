@@ -7,7 +7,10 @@ import {
   describeQuantity,
   groupChecklistItems,
   quantitySchema,
+  toChecklistItemDraft,
+  toChecklistItemUpdate,
   updateChecklistItemRequestSchema,
+  validateChecklistItemDraft,
 } from './checklists';
 
 describe('checklistProgress', () => {
@@ -77,5 +80,43 @@ describe('checklist schemas', () => {
     expect(describeQuantity(1.5, 'kg')).toBe('1.5 kg');
     expect(describeQuantity(2, null)).toBe('2');
     expect(describeQuantity(null, null)).toBeNull();
+  });
+});
+
+describe('checklist item drafts', () => {
+  it('round-trips an item and normalizes empty text', () => {
+    const draft = toChecklistItemDraft({
+      id: '01a15256-d783-72e5-8e2d-150e2e1c6400',
+      groupName: null,
+      title: '鸡蛋',
+      notes: null,
+      quantity: 1.5,
+      unit: 'kg',
+      isDone: false,
+      doneAt: null,
+      sortOrder: 0,
+      householdItemId: null,
+    });
+    expect(draft).toEqual({ title: '鸡蛋', groupName: '', quantity: '1.5', unit: 'kg' });
+    expect(
+      updateChecklistItemRequestSchema.parse(
+        toChecklistItemUpdate({ ...draft, quantity: ' ', groupName: '冷藏 ' }),
+      ),
+    ).toEqual({ title: '鸡蛋', groupName: '冷藏', quantity: null, unit: 'kg' });
+  });
+
+  it('rejects a non-numeric quantity before it is sent', () => {
+    expect(
+      validateChecklistItemDraft({
+        title: '鸡蛋',
+        groupName: '',
+        quantity: '一打',
+        unit: '',
+      }),
+    ).toEqual({ data: null, error: '请填写数量' });
+    expect(
+      validateChecklistItemDraft({ title: ' ', groupName: '', quantity: '', unit: '' })
+        .error,
+    ).toBe('请填写项目');
   });
 });

@@ -21,6 +21,7 @@ const base: LifeRecord = {
   checklist: null,
   householdItem: null,
   reminders: [],
+  nextOccurrenceDate: null,
 };
 
 describe('describeRecordSummary', () => {
@@ -40,11 +41,35 @@ describe('describeRecordSummary', () => {
             timeOfDay: null,
             end: { type: 'never' },
           },
+          nextOccurrenceDate: '2026-10-22',
         },
         '2026-10-19',
         'Asia/Shanghai',
       ),
     ).toBe('每周四 · 下次 10月22日 周四');
+  });
+
+  it('says a recurring record has ended when there is no next date', () => {
+    expect(
+      describeRecordSummary(
+        {
+          ...base,
+          type: 'recurring',
+          title: '复健',
+          recurring: {
+            startDate: '2026-09-01',
+            freq: 'daily',
+            interval: 1,
+            byWeekdays: [],
+            byMonthDay: null,
+            timeOfDay: null,
+            end: { type: 'count', count: 10 },
+          },
+        },
+        '2026-10-19',
+        'Asia/Shanghai',
+      ),
+    ).toBe('每天，共 10 次 · 已结束');
   });
 
   it('shows how far away an important date is', () => {

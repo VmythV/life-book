@@ -115,6 +115,49 @@ export const updateChecklistItemRequestSchema = z.object({
 });
 export type UpdateChecklistItemRequest = z.input<typeof updateChecklistItemRequestSchema>;
 
+/** 编辑单个项目的表单：全部用字符串保存输入，提交时再转换。 */
+export interface ChecklistItemDraft {
+  title: string;
+  groupName: string;
+  quantity: string;
+  unit: string;
+}
+
+export function toChecklistItemDraft(item: ChecklistItem): ChecklistItemDraft {
+  return {
+    title: item.title,
+    groupName: item.groupName ?? '',
+    quantity: item.quantity === null ? '' : String(item.quantity),
+    unit: item.unit ?? '',
+  };
+}
+
+/**
+ * 校验表单并转成修改请求；不合法时返回第一条错误。
+ * 必须先校验再提交：数量写成文字时是 `NaN`，序列化成 JSON 会变成 `null`，等于清空数量。
+ */
+export function validateChecklistItemDraft(
+  draft: ChecklistItemDraft,
+): { data: UpdateChecklistItemRequest; error: null } | { data: null; error: string } {
+  const result = updateChecklistItemRequestSchema.safeParse(toChecklistItemUpdate(draft));
+  return result.success
+    ? { data: result.data, error: null }
+    : { data: null, error: result.error.issues[0]?.message ?? '内容有误' };
+}
+
+/** 表单转成修改请求；数量不是数字时交给 schema 报错。 */
+export function toChecklistItemUpdate(
+  draft: ChecklistItemDraft,
+): UpdateChecklistItemRequest {
+  const quantity = draft.quantity.trim();
+  return {
+    title: draft.title,
+    groupName: draft.groupName,
+    quantity: quantity === '' ? null : Number(quantity),
+    unit: draft.unit,
+  };
+}
+
 export const completeAllRequestSchema = z.object({ done: z.boolean().default(true) });
 export type CompleteAllRequest = z.input<typeof completeAllRequestSchema>;
 

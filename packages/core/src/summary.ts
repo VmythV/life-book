@@ -2,7 +2,7 @@ import { checklistProgress, describeQuantity } from './checklists';
 import { describeLocalDate, type LocalDate, zonedDateTime } from './dates';
 import { describeDaysUntil, nextImportantDate } from './important-dates';
 import { type LifeRecord } from './records';
-import { describeRecurrence, nextOccurrence } from './recurrence';
+import { describeRecurrence } from './recurrence';
 
 /** 列表里每条记录下方的一行说明：重复方式和下次日期、重要日期还有几天、清单进度，或备忘正文开头。 */
 export function describeRecordSummary(
@@ -36,7 +36,8 @@ export function describeRecordSummary(
     return parts.join(' · ');
   }
   if (record.recurring !== null) {
-    const next = nextOccurrence(record.recurring, today);
+    // 服务端已按改期和处理状态算好下一次。
+    const next = record.nextOccurrenceDate;
     const rule = describeRecurrence(record.recurring);
     return next === null
       ? `${rule} · 已结束`

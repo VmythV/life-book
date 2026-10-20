@@ -158,6 +158,11 @@ export const recordSchema = z.object({
   checklist: checklistSchema.nullable(),
   householdItem: householdItemSchema.nullable(),
   reminders: z.array(reminderSchema),
+  /**
+   * 重复日常下一次待完成的实际日期（按用户时区的今天算，已考虑改期、完成和跳过）；
+   * 规则已结束或不是重复日常时为 `null`。
+   */
+  nextOccurrenceDate: localDateSchema.nullable(),
 });
 export type LifeRecord = z.infer<typeof recordSchema>;
 

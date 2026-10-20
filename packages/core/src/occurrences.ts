@@ -67,18 +67,36 @@ export function rescheduleIssue(originalDate: LocalDate, to: LocalDate): string 
 }
 
 /**
- * 下一次待完成的实际日期。`listed` 是 `[today, listedUntil]` 内已经查到的实例（含改期和处理状态）；
- * 区间内没有待完成的，再按规则往后找。
+ * 从今天起下一次待完成的实际日期：考虑改期，跳过已完成和已跳过的实例。
+ * 改期最多 60 天，所以先在 `[today, today + 60]` 内找，找不到再按规则往后找。
  */
-export function nextPendingDate(
+export function nextPendingOccurrence(
   rule: RecurrenceRule,
-  listed: readonly { date: LocalDate; status: string }[] | undefined,
+  stored: ReadonlyMap<LocalDate, StoredOccurrence>,
   today: LocalDate,
-  listedUntil: LocalDate,
 ): LocalDate | null {
-  if (listed === undefined) {
-    return nextOccurrence(rule, today);
-  }
-  const pending = listed.find((item) => item.date >= today && item.status === 'pending');
-  return pending?.date ?? nextOccurrence(rule, addDays(listedUntil, 1));
+  const until = addDays(today, MAX_RESCHEDULE_DAYS);
+  const pending = effectiveOccurrences(rule, stored, today, until).find(
+    (occurrence) => !isHandled(occurrence.stored),
+  );
+  return pending?.date ?? nextOccurrence(rule, addDays(until, 1));
+}
+
+/**
+ * 详情页“最近”要显示的实例：今天及以前的全部，加上之后最近 `upcomingDays` 个日期的。
+ * 按日期而不是条数截取，改期后同一天的两次都会显示。`items` 须按日期升序。
+ */
+export function recentOccurrences<TItem extends { date: LocalDate }>(
+  items: readonly TItem[],
+  today: LocalDate,
+  upcomingDays = 3,
+): TItem[] {
+  const upcoming = items.filter((item) => item.date > today);
+  const lastDate = [...new Set(upcoming.map((item) => item.date))]
+    .slice(0, upcomingDays)
+    .at(-1);
+  return [
+    ...items.filter((item) => item.date <= today),
+    ...upcoming.filter((item) => lastDate !== undefined && item.date <= lastDate),
+  ];
 }
