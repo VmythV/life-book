@@ -18,10 +18,14 @@ import {
   IMPORTANT_DATE_KIND_LABELS,
   type LifeRecord,
   nextImportantDate,
-  nextPendingDate,
   type Occurrence,
   RECORD_TYPE_LABELS,
+  type ChecklistItemDraft,
   describeTrashExpiry,
+  toChecklistItemDraft,
+  type UpdateChecklistItemRequest,
+  validateChecklistItemDraft,
+  recentOccurrences,
   STOCK_KIND_LABELS,
   zonedDateTime,
 } from '@life-book/core';
@@ -339,9 +343,6 @@ function RecordActions({ record }: { record: LifeRecord }) {
   );
 }
 
-/** 未来的实例只列出最近几次。 */
-const UPCOMING_COUNT = 3;
-
 const OCCURRENCE_LABELS: Record<Occurrence['status'], string> = {
   pending: '待完成',
   overdue: '逾期',
@@ -378,11 +379,7 @@ function RecentOccurrences({ recordId, today }: { recordId: string; today: strin
   if (list.data === undefined) {
     return null;
   }
-  const past = list.data.items.filter((item) => item.date <= today);
-  const items = [
-    ...past,
-    ...list.data.items.filter((item) => item.date > today).slice(0, UPCOMING_COUNT),
-  ];
+  const items = recentOccurrences(list.data.items, today);
   if (items.length === 0) {
     return <p className="mt-3 text-sm text-fg-muted">前后两周没有安排。</p>;
   }
@@ -565,40 +562,17 @@ function ChecklistSection({
               <p className="mb-1 text-xs font-semibold text-fg-subtle">{group.name}</p>
             )}
             <ul className="divide-y divide-line rounded-xl border border-line">
-              {group.items.map((item) => {
-                const quantity = describeQuantity(item.quantity, item.unit);
-                return (
-                  <li key={item.id} className="flex items-center gap-3 px-3 py-2">
-                    <input
-                      type="checkbox"
-                      aria-label={item.title}
-                      checked={item.isDone}
-                      disabled={readOnly}
-                      onChange={() => toggle.mutate(item)}
-                      className="size-4 accent-(--color-primary)"
-                    />
-                    <span
-                      className={`min-w-0 flex-1 break-words ${item.isDone ? 'text-fg-subtle line-through' : ''}`}
-                    >
-                      {item.title}
-                      {quantity === null ? null : (
-                        <span className="ml-2 text-xs text-fg-muted">{quantity}</span>
-                      )}
-                    </span>
-                    {readOnly ? null : (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        aria-label={`删除 ${item.title}`}
-                        disabled={remove.isPending}
-                        onClick={() => remove.mutate(item.id)}
-                      >
-                        删除
-                      </Button>
-                    )}
-                  </li>
-                );
-              })}
+              {group.items.map((item) => (
+                <ChecklistItemRow
+                  key={item.id}
+                  recordId={record.id}
+                  item={item}
+                  readOnly={readOnly}
+                  removing={remove.isPending}
+                  onToggle={() => toggle.mutate(item)}
+                  onRemove={() => remove.mutate(item.id)}
+                />
+              ))}
             </ul>
           </div>
         ))}
@@ -627,6 +601,143 @@ function ChecklistSection({
         </form>
       )}
     </DetailSection>
+  );
+}
+
+/** 清单里的一项：勾选、删除，点“编辑”后就地修改名称、分组、数量和单位。 */
+function ChecklistItemRow({
+  recordId,
+  item,
+  readOnly,
+  removing,
+  onToggle,
+  onRemove,
+}: {
+  recordId: string;
+  item: ChecklistItem;
+  readOnly: boolean;
+  removing: boolean;
+  onToggle: () => void;
+  onRemove: () => void;
+}) {
+  const invalidate = useInvalidateRecords();
+  const [draft, setDraft] = useState<ChecklistItemDraft | null>(null);
+  const [invalid, setInvalid] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: (input: UpdateChecklistItemRequest) =>
+      api.checklistItems.update(recordId, item.id, input),
+    onSuccess: () => setDraft(null),
+    onSettled: invalidate,
+  });
+  const error = invalid ?? (save.isError ? describeError(save.error) : null);
+  const inputClass =
+    'h-8 min-w-0 rounded-lg border border-line bg-surface px-2 text-sm text-fg placeholder:text-fg-subtle';
+
+  if (draft !== null) {
+    const change = (patch: Partial<ChecklistItemDraft>) =>
+      setDraft({ ...draft, ...patch });
+    return (
+      <li className="px-3 py-2">
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const result = validateChecklistItemDraft(draft);
+            setInvalid(result.error);
+            if (result.data !== null) {
+              save.mutate(result.data);
+            }
+          }}
+        >
+          <input
+            aria-label="项目名称"
+            value={draft.title}
+            maxLength={200}
+            autoFocus
+            onChange={(event) => change({ title: event.target.value })}
+            className={`${inputClass} flex-1 basis-40`}
+          />
+          <input
+            aria-label="分组"
+            placeholder="分组"
+            value={draft.groupName}
+            maxLength={30}
+            onChange={(event) => change({ groupName: event.target.value })}
+            className={`${inputClass} w-24`}
+          />
+          <input
+            aria-label="数量"
+            placeholder="数量"
+            inputMode="decimal"
+            value={draft.quantity}
+            onChange={(event) => change({ quantity: event.target.value })}
+            className={`${inputClass} w-20`}
+          />
+          <input
+            aria-label="单位"
+            placeholder="单位"
+            value={draft.unit}
+            maxLength={10}
+            onChange={(event) => change({ unit: event.target.value })}
+            className={`${inputClass} w-16`}
+          />
+          <Button type="submit" size="sm" loading={save.isPending}>
+            保存
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setDraft(null)}>
+            取消
+          </Button>
+        </form>
+        {error === null ? null : <p className="mt-1 text-xs text-danger">{error}</p>}
+      </li>
+    );
+  }
+
+  const quantity = describeQuantity(item.quantity, item.unit);
+  return (
+    <li className="flex items-center gap-3 px-3 py-2">
+      <input
+        type="checkbox"
+        aria-label={item.title}
+        checked={item.isDone}
+        disabled={readOnly}
+        onChange={onToggle}
+        className="size-4 accent-(--color-primary)"
+      />
+      <span
+        className={`min-w-0 flex-1 break-words ${item.isDone ? 'text-fg-subtle line-through' : ''}`}
+      >
+        {item.title}
+        {quantity === null ? null : (
+          <span className="ml-2 text-xs text-fg-muted">{quantity}</span>
+        )}
+      </span>
+      {readOnly ? null : (
+        <>
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label={`编辑 ${item.title}`}
+            onClick={() => {
+              save.reset();
+              setInvalid(null);
+              setDraft(toChecklistItemDraft(item));
+            }}
+          >
+            编辑
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label={`删除 ${item.title}`}
+            disabled={removing}
+            onClick={onRemove}
+          >
+            删除
+          </Button>
+        </>
+      )}
+    </li>
   );
 }
 
@@ -813,17 +924,11 @@ function HouseholdSection({
   );
 }
 
-/** “下次：……”：按查到的实例计算，改期和已处理的都考虑在内。 */
+/** “下次：……”：服务端已按改期和处理状态算好。 */
 function NextOccurrence({ record, today }: { record: LifeRecord; today: string }) {
-  const until = addDays(today, 14);
-  // 与“最近”列表使用同一个查询，不会重复请求。
-  const list = useQuery({
-    ...occurrencesQuery(record.id, addDays(today, -14), until),
-    enabled: record.deletedAt === null,
-  });
   if (record.recurring === null) {
     return null;
   }
-  const next = nextPendingDate(record.recurring, list.data?.items, today, until);
+  const next = record.nextOccurrenceDate;
   return <>{next === null ? '已结束' : `下次：${describeLocalDate(next, today)}`}</>;
 }

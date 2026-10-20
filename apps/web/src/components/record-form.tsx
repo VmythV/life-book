@@ -16,13 +16,16 @@ import {
   type RecordFormFreq,
   type RecordFormReminder,
   type RecordFormState,
+  DISCARD_CHANGES_MESSAGE,
+  isRecordFormDirty,
   TODAY_VISIBILITY_HINTS,
   toRecordRequest,
   validateFields,
   weekdayName,
 } from '@life-book/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, type ReactNode, useState } from 'react';
+import { useBlocker } from '@tanstack/react-router';
+import { type FormEvent, type ReactNode, useRef, useState } from 'react';
 
 import { api } from '../api';
 import { categoriesQuery, tagsQuery } from '../queries';
@@ -51,7 +54,21 @@ export function RecordForm({
 }) {
   const [state, setState] = useState(initial);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const submit = useMutation({ mutationFn: onSubmit });
+  // 提交时由调用方跳转，这时不再拦截。
+  const saving = useRef(false);
+  const submit = useMutation({
+    mutationFn: onSubmit,
+    onError: () => {
+      saving.current = false;
+    },
+  });
+  const dirty = isRecordFormDirty(initial, state);
+  // 有未保存的修改时，站内跳转先确认，关闭或刷新页面时由浏览器提示。
+  useBlocker({
+    shouldBlockFn: () =>
+      dirty && !saving.current && !window.confirm(DISCARD_CHANGES_MESSAGE),
+    enableBeforeUnload: () => dirty && !saving.current,
+  });
 
   // 修改某一部分后，清掉这一部分上次提交时的错误。
   const clearError = (field: string) =>
@@ -101,6 +118,7 @@ export function RecordForm({
     const { data, errors } = validateFields(createRecordRequestSchema, request);
     setFieldErrors(errors ?? {});
     if (data !== null) {
+      saving.current = true;
       submit.mutate(request);
     }
   }
@@ -356,7 +374,9 @@ export function RecordForm({
               onChange={(items) => updateChecklist({ items })}
             />
           ) : (
-            <p className="text-sm text-fg-muted">项目在详情里直接添加、勾选和删除。</p>
+            <p className="text-sm text-fg-muted">
+              项目在详情里直接添加、编辑、勾选和删除。
+            </p>
           )}
         </FormSection>
       ) : null}
