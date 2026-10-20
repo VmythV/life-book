@@ -43,6 +43,27 @@ MVP 和 V1 功能已完成，Web 和 Android 真机已在本地跑通。下一�
 - [决策记录](docs/decisions.md)：重要决定及与旧文档的关系
 - [归档资料](archive/README.md)：旧规划文档，只读参考
 
+## 日常使用
+
+服务端和数据库跑在自己的 Mac 上，手机和其他电脑通过同一个 Wi-Fi 访问（见 [D-022](docs/decisions.md)）。
+
+```sh
+pnpm serve            # 启动数据库、构建 Web、迁移并启动服务端，一直开着
+```
+
+启动后会打印局域网地址，如 `http://192.168.1.5:8787`：
+
+- **Web**：在同一 Wi-Fi 下的任何浏览器打开这个地址。
+- **Android**：`pnpm android:release` 打一个独立运行的安装包（默认连本机当前的局域网地址），再用 `adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk` 安装，或把这个文件传到手机上安装。电脑换了地址时，在登录页或“我的”底部修改服务器地址，不用重装。
+
+注意：
+
+- 电脑睡眠后手机就连不上了。`pnpm serve` 会阻止空闲睡眠，但合上笔记本盖子仍会睡眠；需要时在“系统设置 → 电池”里打开“接通电源时防止自动进入睡眠”。
+- 第一次启动时 macOS 可能询问是否允许 `node` 接受传入连接，选“允许”。
+- 出门在外连不上电脑时，手机显示上次同步的内容，已经排好的提醒照常响。
+- `pnpm serve` 和 `pnpm dev` 都使用 8787 端口和同一个数据库，不要同时运行。
+- 日常使用版（“生活有谱”）和开发版（“生活有谱开发版”）包名不同，可以同时装在手机上。
+
 ## 本地开发
 
 需要 Node 24（见 `.node-version`）、Corepack 和 Docker：
@@ -58,7 +79,7 @@ pnpm dev          # 服务端 http://localhost:8787，Web http://localhost:5180
 手机端（需要先安装 Xcode 或 Android SDK 来构建开发包）：
 
 ```sh
-pnpm --filter @life-book/mobile android   # 或 ios，首次会构建原生开发包
+pnpm --filter @life-book/mobile android   # 构建并安装开发版（“生活有谱开发版”）
 pnpm dev:mobile                           # 之后只需启动 Metro
 ```
 
