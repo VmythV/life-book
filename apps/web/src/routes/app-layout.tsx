@@ -4,8 +4,11 @@ import { Link, Outlet } from '@tanstack/react-router';
 import { meQuery } from '../queries';
 
 const navItems = [
-  { to: '/', label: '今天' },
-  { to: '/settings', label: '设置' },
+  { to: '/', label: '今天', exact: true },
+  { to: '/book', label: '生活簿', exact: false },
+  { to: '/home', label: '家中', exact: true },
+  { to: '/templates', label: '清单模板', exact: false },
+  { to: '/settings', label: '设置', exact: true },
 ] as const;
 
 export function AppLayout() {
@@ -20,7 +23,7 @@ export function AppLayout() {
             <Link
               key={item.to}
               to={item.to}
-              activeOptions={{ exact: true }}
+              activeOptions={{ exact: item.exact, includeSearch: false }}
               className="rounded-lg px-3 py-2 text-sm font-semibold text-fg-muted hover:bg-surface-subtle"
               activeProps={{ className: 'bg-surface-subtle !text-fg' }}
             >
@@ -33,7 +36,7 @@ export function AppLayout() {
         </p>
       </aside>
       <main className="flex-1 px-4 py-8 md:px-10">
-        <div className="mx-auto max-w-3xl">
+        <div className="mx-auto max-w-6xl">
           <Outlet />
         </div>
       </main>

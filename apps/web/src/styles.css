@@ -24,6 +24,11 @@
   --color-danger-container: var(--lb-state-danger-container);
   --color-info: var(--lb-state-info-foreground);
   --color-info-container: var(--lb-state-info-container);
+  --color-success: var(--lb-state-success-foreground);
+  --color-success-container: var(--lb-state-success-container);
+  --color-warning: var(--lb-state-warning-foreground);
+  --color-warning-container: var(--lb-state-warning-container);
+  --color-scrim: var(--lb-overlay-scrim);
 
   --font-sans:
     system-ui, -apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',

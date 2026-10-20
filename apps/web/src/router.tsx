@@ -1,4 +1,5 @@
 import { isApiError } from '@life-book/api-client';
+import { type CreatableRecordType, creatableRecordTypes } from '@life-book/core';
 import { type QueryClient } from '@tanstack/react-query';
 import {
   createRootRouteWithContext,
@@ -11,11 +12,15 @@ import {
 import { queryClient } from './api';
 import { meQuery } from './queries';
 import { AppLayout } from './routes/app-layout';
+import { BookPage, validateBookSearch } from './routes/book';
+import { HomePage } from './routes/home';
 import { LoginPage } from './routes/login';
 import { NotFoundPage } from './routes/not-found';
+import { EditRecordPage, NewRecordPage } from './routes/record-edit';
 import { RegisterPage } from './routes/register';
 import { RouteError } from './routes/route-error';
 import { SettingsPage } from './routes/settings';
+import { TemplatesPage, validateTemplatesSearch } from './routes/templates';
 import { TodayPage } from './routes/today';
 
 interface RouterContext {
@@ -77,6 +82,43 @@ const todayRoute = createRoute({
   component: TodayPage,
 });
 
+const bookRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/book',
+  validateSearch: validateBookSearch,
+  component: BookPage,
+});
+
+const newRecordRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/book/new',
+  validateSearch: (search: Record<string, unknown>): { type: CreatableRecordType } => ({
+    type: (creatableRecordTypes as readonly unknown[]).includes(search.type)
+      ? (search.type as CreatableRecordType)
+      : 'recurring',
+  }),
+  component: NewRecordPage,
+});
+
+const editRecordRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/book/$id/edit',
+  component: EditRecordPage,
+});
+
+const homeRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/home',
+  component: HomePage,
+});
+
+const templatesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/templates',
+  validateSearch: validateTemplatesSearch,
+  component: TemplatesPage,
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/settings',
@@ -86,7 +128,15 @@ const settingsRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   loginRoute,
   registerRoute,
-  appRoute.addChildren([todayRoute, settingsRoute]),
+  appRoute.addChildren([
+    todayRoute,
+    bookRoute,
+    newRecordRoute,
+    editRecordRoute,
+    homeRoute,
+    templatesRoute,
+    settingsRoute,
+  ]),
 ]);
 
 export const router = createRouter({
