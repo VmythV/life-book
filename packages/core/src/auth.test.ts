@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { loginRequestSchema, registerRequestSchema, usernameSchema } from './auth';
+import { loginRequestSchema, createUserInputSchema, usernameSchema } from './auth';
 
 describe('usernameSchema', () => {
   it('normalizes case and surrounding spaces', () => {
@@ -15,9 +15,9 @@ describe('usernameSchema', () => {
   );
 });
 
-describe('registerRequestSchema', () => {
+describe('createUserInputSchema', () => {
   it('requires a password of at least 8 characters', () => {
-    const result = registerRequestSchema.safeParse({
+    const result = createUserInputSchema.safeParse({
       username: 'alice',
       password: 'short',
     });
@@ -25,7 +25,7 @@ describe('registerRequestSchema', () => {
   });
 
   it('rejects an unknown time zone', () => {
-    const result = registerRequestSchema.safeParse({
+    const result = createUserInputSchema.safeParse({
       username: 'alice',
       password: 'long-enough',
       timezone: 'Mars/Olympus',
@@ -35,7 +35,7 @@ describe('registerRequestSchema', () => {
 
   it('accepts a valid request', () => {
     expect(
-      registerRequestSchema.parse({
+      createUserInputSchema.parse({
         username: 'Alice',
         password: 'long-enough',
         timezone: 'Asia/Shanghai',

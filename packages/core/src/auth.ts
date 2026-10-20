@@ -20,16 +20,17 @@ export const passwordSchema = z
 
 export const displayNameSchema = z.string().trim().min(1).max(50);
 
-export const registerRequestSchema = z.object({
+/** 新建账号（服务端 `create-user` 脚本使用；应用里没有注册入口）。 */
+export const createUserInputSchema = z.object({
   username: usernameSchema,
   password: passwordSchema,
   displayName: displayNameSchema.optional(),
   timezone: timeZoneSchema.optional(),
 });
-export type RegisterRequest = z.input<typeof registerRequestSchema>;
+export type CreateUserInput = z.input<typeof createUserInputSchema>;
 
 export const loginRequestSchema = z.object({
-  // 登录时只做规范化，不按注册规则校验，统一由“用户名或密码错误”回应。
+  // 登录时只做规范化，不按建账号的规则校验，统一由“用户名或密码错误”回应。
   username: z.string().trim().toLowerCase().min(1).max(64),
   password: z.string().min(1).max(PASSWORD_MAX_LENGTH),
 });
@@ -50,7 +51,7 @@ export const userSchema = z.object({
 export type User = z.infer<typeof userSchema>;
 
 /**
- * 注册和登录的响应。`token` 只在客户端声明为令牌模式（手机端）时返回；
+ * 登录的响应。`token` 只在客户端声明为令牌模式（手机端）时返回；
  * Web 端改用 httpOnly Cookie，响应中不含令牌。
  */
 export const authResponseSchema = z.object({
