@@ -123,7 +123,9 @@ export function templateRoutes(deps: AppDeps) {
         if (row !== undefined && row.userId !== userId) {
           throw new ApiError(409, 'ID_CONFLICT', '记录 ID 已被使用，请重新提交');
         }
-        return row === undefined ? undefined : loadRecord(deps.db, userId, input.id);
+        return row === undefined
+          ? undefined
+          : loadRecord(deps.db, userId, input.id, deps.now());
       };
       const before = await existing();
       if (before !== undefined) {
@@ -172,7 +174,7 @@ export function templateRoutes(deps: AppDeps) {
         }
         throw error;
       }
-      const record = await loadRecord(deps.db, userId, recordId);
+      const record = await loadRecord(deps.db, userId, recordId, deps.now());
       return c.json(record, 201);
     });
 }

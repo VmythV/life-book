@@ -1,4 +1,5 @@
 import {
+  addDays,
   type ChecklistData,
   type ChecklistSettingsData,
   type HouseholdItemData,
@@ -7,10 +8,15 @@ import {
   lowStockTransition,
   type ImportantDate,
   type LifeRecord,
+  type LocalDate,
+  MAX_RESCHEDULE_DAYS,
+  nextPendingOccurrence,
   type RecurrenceRule,
   type ReminderInput,
+  type StoredOccurrence,
+  todayIn,
 } from '@life-book/core';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray } from 'drizzle-orm';
 import { type PgColumn } from 'drizzle-orm/pg-core';
 
 import { type Executor } from '../db/client';
@@ -20,21 +26,27 @@ import {
   checklists,
   householdItems,
   importantDates,
+  occurrences,
   records,
   recordTags,
   recurringRules,
   reminders,
   stockTransactions,
   tags,
+  userSettings,
 } from '../db/schema';
 import { validationFailed } from '../http/errors';
-import { fromRecurrenceRule, toRecordDto } from './mappers';
+import { fromRecurrenceRule, toRecordDto, toRecurrenceRule } from './mappers';
 
-/** 读取一组记录的完整信息，按传入的 ID 顺序返回；不属于该用户的 ID 会被忽略。 */
+/**
+ * 读取一组记录的完整信息，按传入的 ID 顺序返回；不属于该用户的 ID 会被忽略。
+ * `now` 用来按用户时区算出重复日常的下一次。
+ */
 export async function loadRecords(
   db: Executor,
   userId: string,
   recordIds: string[],
+  now: Date,
 ): Promise<LifeRecord[]> {
   if (recordIds.length === 0) {
     return [];
@@ -77,6 +89,7 @@ export async function loadRecords(
       .orderBy(asc(recordTags.createdAt)),
   ]);
 
+  const nextDates = await loadNextOccurrenceDates(db, userId, ruleRows, now);
   const byId = new Map(recordRows.map((row) => [row.id, row]));
   return recordIds.flatMap((id) => {
     const row = byId.get(id);
@@ -92,17 +105,65 @@ export async function loadRecords(
         householdItem: householdRows.find((item) => item.recordId === id),
         reminders: reminderRows.filter((reminder) => reminder.recordId === id),
         tagIds: tagRows.filter((tag) => tag.recordId === id).map((tag) => tag.tagId),
+        nextOccurrenceDate: nextDates.get(id) ?? null,
       }),
     ];
   });
+}
+
+/** 重复日常从今天起下一次待完成的日期；改期最多 60 天，所以只需读最近 60 天以后的实例。 */
+async function loadNextOccurrenceDates(
+  db: Executor,
+  userId: string,
+  ruleRows: (typeof recurringRules.$inferSelect)[],
+  now: Date,
+): Promise<Map<string, LocalDate | null>> {
+  const result = new Map<string, LocalDate | null>();
+  if (ruleRows.length === 0) {
+    return result;
+  }
+  const [settings] = await db
+    .select({ timezone: userSettings.timezone })
+    .from(userSettings)
+    .where(eq(userSettings.userId, userId));
+  const today = todayIn(settings?.timezone ?? 'UTC', now);
+  const storedRows = await db
+    .select()
+    .from(occurrences)
+    .where(
+      and(
+        eq(occurrences.userId, userId),
+        inArray(
+          occurrences.recordId,
+          ruleRows.map((rule) => rule.recordId),
+        ),
+        gte(occurrences.occurrenceDate, addDays(today, -MAX_RESCHEDULE_DAYS)),
+      ),
+    );
+  for (const rule of ruleRows) {
+    const stored = new Map<LocalDate, StoredOccurrence>(
+      storedRows
+        .filter((row) => row.recordId === rule.recordId)
+        .map((row) => [
+          row.occurrenceDate,
+          { status: row.status, rescheduledTo: row.rescheduledTo },
+        ]),
+    );
+    result.set(
+      rule.recordId,
+      nextPendingOccurrence(toRecurrenceRule(rule), stored, today),
+    );
+  }
+  return result;
 }
 
 export async function loadRecord(
   db: Executor,
   userId: string,
   recordId: string,
+  now: Date,
 ): Promise<LifeRecord | undefined> {
-  const [record] = await loadRecords(db, userId, [recordId]);
+  const [record] = await loadRecords(db, userId, [recordId], now);
   return record;
 }
 

@@ -6,6 +6,7 @@ import {
   type StockTransaction,
   type ImportantDate,
   type LifeRecord,
+  type LocalDate,
   type RecurrenceRule,
   type Reminder,
 } from '@life-book/core';
@@ -150,6 +151,7 @@ export function toRecordDto(
     householdItem: typeof householdItems.$inferSelect | undefined;
     reminders: (typeof reminders.$inferSelect)[];
     tagIds: string[];
+    nextOccurrenceDate: LocalDate | null;
   },
 ): LifeRecord {
   return {
@@ -175,5 +177,6 @@ export function toRecordDto(
     householdItem:
       details.householdItem === undefined ? null : toHouseholdItem(details.householdItem),
     reminders: details.reminders.map(toReminder),
+    nextOccurrenceDate: details.nextOccurrenceDate,
   };
 }

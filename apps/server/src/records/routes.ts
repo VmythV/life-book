@@ -140,7 +140,7 @@ export function recordRoutes(deps: AppDeps) {
     recordId: string,
     status: 200 | 201 = 200,
   ) {
-    const record = await loadRecord(db, c.get('auth').userId, recordId);
+    const record = await loadRecord(db, c.get('auth').userId, recordId, deps.now());
     if (record === undefined) {
       throw notFound();
     }
@@ -173,7 +173,7 @@ export function recordRoutes(deps: AppDeps) {
     if (!date.success) {
       throw notFound();
     }
-    const record = await loadRecord(deps.db, userId, recordId);
+    const record = await loadRecord(deps.db, userId, recordId, deps.now());
     if (record?.recurring == null || record.deletedAt !== null) {
       throw notFound();
     }
@@ -258,6 +258,7 @@ export function recordRoutes(deps: AppDeps) {
         deps.db,
         userId,
         rows.slice(0, query.limit).map((row) => row.id),
+        deps.now(),
       );
       const last = items.at(-1);
       const body: RecordListResponse = {
@@ -407,7 +408,12 @@ export function recordRoutes(deps: AppDeps) {
       return c.json(body);
     })
     .get('/:id', async (c) => {
-      const record = await loadRecord(deps.db, c.get('auth').userId, recordIdParam(c));
+      const record = await loadRecord(
+        deps.db,
+        c.get('auth').userId,
+        recordIdParam(c),
+        deps.now(),
+      );
       if (record === undefined) {
         throw notFound();
       }
@@ -423,7 +429,7 @@ export function recordRoutes(deps: AppDeps) {
 
       await deps.db.transaction(async (tx) => {
         await findRecord(tx, userId, recordId, { lock: true });
-        const current = await loadRecord(tx, userId, recordId);
+        const current = await loadRecord(tx, userId, recordId, deps.now());
         if (current === undefined) {
           throw notFound();
         }
@@ -528,7 +534,7 @@ export function recordRoutes(deps: AppDeps) {
       if (daysBetween(range.from, range.to) > MAX_OCCURRENCE_RANGE_DAYS) {
         throw validationFailed({ to: `一次最多查询 ${MAX_OCCURRENCE_RANGE_DAYS} 天` });
       }
-      const record = await loadRecord(deps.db, userId, recordId);
+      const record = await loadRecord(deps.db, userId, recordId, deps.now());
       // 只读：回收站里的记录也可以查看历史实例。
       if (record?.recurring == null) {
         throw notFound();

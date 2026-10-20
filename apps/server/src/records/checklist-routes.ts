@@ -182,7 +182,7 @@ export function checklistItemRoutes(deps: AppDeps) {
           );
         await touchRecord(tx, userId, recordId, now);
       });
-      const record = await loadRecord(deps.db, userId, recordId);
+      const record = await loadRecord(deps.db, userId, recordId, deps.now());
       if (record === undefined) {
         throw notFound();
       }
@@ -192,7 +192,7 @@ export function checklistItemRoutes(deps: AppDeps) {
       const { userId } = c.get('auth');
       const recordId = uuidParam(c, 'id');
       const input = await readJson(c, saveAsTemplateRequestSchema);
-      const record = await loadRecord(deps.db, userId, recordId);
+      const record = await loadRecord(deps.db, userId, recordId, deps.now());
       if (record?.checklist == null || record.deletedAt !== null) {
         throw notFound();
       }

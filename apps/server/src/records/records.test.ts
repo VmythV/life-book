@@ -89,6 +89,7 @@ describe('POST /api/v1/records', () => {
           timeOfDay: null,
         },
       ],
+      nextOccurrenceDate: '2026-10-19',
     });
   });
 
@@ -556,6 +557,33 @@ describe('occurrences', () => {
     // 取消改期回到原定日期。
     await request(app, 'DELETE', `${path}/2026-10-22/reschedule`, { cookie });
     expect((await list())[1]).toEqual(['2026-10-22', '2026-10-22', 'pending']);
+  });
+
+  it('reports the next pending date after completing and rescheduling', async () => {
+    const { app, cookie } = await setup();
+    const record = await createRecord(app, cookie, {
+      type: 'recurring',
+      title: '浇水',
+      recurring: weeklyRule,
+    });
+    const path = `/api/v1/records/${record.id}/occurrences`;
+    const next = async () => {
+      const list = await listRecords(app, cookie, '?type=recurring');
+      return list.items[0]?.nextOccurrenceDate;
+    };
+
+    expect(await next()).toBe('2026-10-19');
+    // 今天完成后，下一次是周四；周四改到周二，下一次就是周二。
+    await request(app, 'PUT', `${path}/2026-10-19`, {
+      cookie,
+      body: { status: 'completed' },
+    });
+    expect(await next()).toBe('2026-10-22');
+    await request(app, 'PUT', `${path}/2026-10-22/reschedule`, {
+      cookie,
+      body: { to: '2026-10-20' },
+    });
+    expect(await next()).toBe('2026-10-20');
   });
 
   it('limits how far an occurrence can move', async () => {

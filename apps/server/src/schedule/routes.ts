@@ -34,6 +34,7 @@ async function loadScheduleRecords(
   userId: string,
   /** 从这一天（按原定日期）开始读取已保存的实例。 */
   storedFrom: LocalDate,
+  now: Date,
 ): Promise<{
   items: LifeRecord[];
   stored: Map<string, Map<LocalDate, StoredOccurrence>>;
@@ -59,6 +60,7 @@ async function loadScheduleRecords(
     db,
     userId,
     rows.map((row) => row.id),
+    now,
   );
   const storedRows = await db
     .select()
@@ -89,6 +91,7 @@ export function todayRoutes(deps: AppDeps) {
       deps.db,
       userId,
       addDays(date, -OVERDUE_LOOKBACK_DAYS - MAX_RESCHEDULE_DAYS - 1),
+      deps.now(),
     );
 
     return c.json(
@@ -180,6 +183,7 @@ export function reminderRoutes(deps: AppDeps) {
       deps.db,
       userId,
       addDays(todayIn(settings.timezone, now), -MAX_RESCHEDULE_DAYS),
+      now,
     );
 
     // 还没提醒过的低库存（只算未删除、未归档的物品）。

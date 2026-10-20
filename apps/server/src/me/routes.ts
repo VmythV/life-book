@@ -105,6 +105,7 @@ export function meRoutes(deps: AppDeps) {
             deps.db,
             userId,
             recordIds.map((record) => record.id),
+            deps.now(),
           ),
         ]);
       const filename = `life-book-${row.user.username}-${deps.now().toISOString().slice(0, 10)}.json`;
