@@ -19,6 +19,7 @@ import { useState } from 'react';
 import { api } from '../api';
 import { RecordForm } from '../components/record-form';
 import { Alert, Button, Card } from '../components/ui';
+import { newId } from '../lib/ids';
 import { meQuery, recordQuery, templatesQuery, useInvalidateRecords } from '../queries';
 
 export function NewRecordPage() {
@@ -28,7 +29,7 @@ export function NewRecordPage() {
   const invalidate = useInvalidateRecords();
   const timeZone = me.settings.timezone;
   // 客户端生成 ID：网络重试时服务端会返回同一条记录，不会重复创建。
-  const [recordId] = useState(() => crypto.randomUUID());
+  const [recordId] = useState(newId);
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">

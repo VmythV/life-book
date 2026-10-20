@@ -14,6 +14,7 @@ import { type FormEvent, useState } from 'react';
 import { api } from '../api';
 import { ChecklistItemsEditor } from '../components/record-form';
 import { Alert, Badge, Button, EmptyState, TextArea, TextField } from '../components/ui';
+import { newId } from '../lib/ids';
 import { templatesQuery, useInvalidateRecords } from '../queries';
 
 export interface TemplatesSearch {
@@ -138,8 +139,7 @@ function TemplateEditor({ template }: { template?: ChecklistTemplate }) {
     },
   });
   const instantiate = useMutation({
-    mutationFn: (id: string) =>
-      api.templates.instantiate(id, { id: crypto.randomUUID() }),
+    mutationFn: (id: string) => api.templates.instantiate(id, { id: newId() }),
     onSuccess: async (record) => {
       await invalidateRecords();
       await navigate({ to: '/book', search: { id: record.id } });
