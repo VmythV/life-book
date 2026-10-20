@@ -43,7 +43,7 @@
 | -------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `GET`    | `/api/v1/records`                                  | 列表：`type`、`categoryId`、`tagId`、`q`（搜索）、`status=active\|archived\|trash`、`sort`                                   |
 | `POST`   | `/api/v1/records`                                  | 新建：按 `type` 区分请求体，见下例                                                                                           |
-| `GET`    | `/api/v1/records/:id`                              | 详情：包含类型详情、标签、提醒                                                                                               |
+| `GET`    | `/api/v1/records/:id`                              | 详情：包含类型详情、标签、提醒；重复日常另有 `nextOccurrenceDate`（见下）                                                    |
 | `PATCH`  | `/api/v1/records/:id`                              | 修改，需带 `version`；省略的字段不变，`reminders`、`tagIds` 和类型详情整体替换。改了重复方式时，新规则从今天开始（见 D-013） |
 | `POST`   | `/api/v1/records/:id/archive` / `unarchive`        | 归档或取消归档                                                                                                               |
 | `DELETE` | `/api/v1/records/:id`                              | 移入回收站                                                                                                                   |
@@ -121,6 +121,8 @@ POST /api/v1/records
   "reminders": [{ "kind": "relative", "daysBefore": 0, "timeOfDay": "09:00" }]
 }
 ```
+
+所有返回记录的接口都带 `nextOccurrenceDate`：重复日常从今天（按用户时区）起下一次待完成的实际日期，已考虑改期，跳过已完成和已跳过的实例；规则已结束或不是重复日常时为 `null`。列表和详情里的“下次”都直接用它。
 
 今天聚合的响应结构（逾期规则见 D-012；`today` 中全天的事项排在前面，其余按时刻）：
 
