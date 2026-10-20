@@ -5,7 +5,8 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start --dev-client",
-    "android": "expo run:android",
+    "android": "expo prebuild --platform android --clean --no-install && expo run:android",
+    "android:release": "sh scripts/android-release.sh",
     "ios": "expo run:ios",
     "prebuild": "expo prebuild --no-install",
     "dependencies:check": "expo install --check",

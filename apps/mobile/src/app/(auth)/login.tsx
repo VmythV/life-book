@@ -6,7 +6,8 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { Button, ErrorBanner, Screen, TextField } from '../../components/ui';
-import { api, apiUrl } from '../../lib/api';
+import { ServerAddress } from '../../components/server-address';
+import { api } from '../../lib/api';
 import { session } from '../../lib/session';
 import { useTheme } from '../../lib/theme';
 import { Brand } from '../../components/brand';
@@ -73,11 +74,7 @@ export default function LoginScreen() {
           还没有账号？注册
         </Link>
       </View>
-      {__DEV__ ? (
-        <Text style={[theme.type['type.caption'], { color: theme.color.textTertiary }]}>
-          服务器：{apiUrl}
-        </Text>
-      ) : null}
+      <ServerAddress />
     </Screen>
   );
 }

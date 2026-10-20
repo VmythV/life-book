@@ -5,6 +5,7 @@ import { Link } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { ServerAddress } from '../../components/server-address';
 import { Button, ErrorBanner, Screen, TextField } from '../../components/ui';
 import { api } from '../../lib/api';
 import { session } from '../../lib/session';
@@ -114,6 +115,7 @@ export default function RegisterScreen() {
           已有账号？登录
         </Link>
       </View>
+      <ServerAddress />
     </Screen>
   );
 }

@@ -15,6 +15,7 @@ import {
 } from '../lib/notifications';
 import { installOnlineManager } from '../lib/online';
 import { persistOptions } from '../lib/persist';
+import { server } from '../lib/server';
 import { session, useSession } from '../lib/session';
 import { useTheme } from '../lib/theme';
 
@@ -38,7 +39,8 @@ export default function RootLayout() {
   const signedIn = state.status === 'signedIn';
 
   useEffect(() => {
-    void session.load();
+    // 先读出用户改过的服务器地址，再恢复会话，避免第一批请求发到默认地址。
+    void server.load().finally(() => void session.load());
     void setupNotifications();
     return installOnlineManager();
   }, []);
