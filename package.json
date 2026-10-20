@@ -10,6 +10,8 @@
   "scripts": {
     "dev": "concurrently -k -n server,web -c blue,green \"pnpm --filter @life-book/server dev\" \"pnpm --filter @life-book/web dev\"",
     "dev:mobile": "pnpm --filter @life-book/mobile start",
+    "android:release": "pnpm --filter @life-book/mobile android:release",
+    "serve": "pnpm db:up && pnpm --filter @life-book/web build && pnpm --filter @life-book/server serve",
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down",
     "db:migrate": "pnpm --filter @life-book/server db:migrate",
