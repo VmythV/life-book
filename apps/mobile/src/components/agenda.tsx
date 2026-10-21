@@ -21,10 +21,13 @@ export function ChecklistRow({
   card,
   today,
   first,
+  onOpen = openRecord,
 }: {
   card: ChecklistCard;
   today: string;
   first: boolean;
+  /** 点这一行时；在弹出的卡片里要先关掉卡片再打开详情。 */
+  onOpen?: (id: string) => void;
 }) {
   const complete = isChecklistComplete(card.done, card.total);
   const due =
@@ -37,7 +40,7 @@ export function ChecklistRow({
       title={card.title}
       subtitle={`${due} · ${card.total === 0 ? '还没有项目' : `${card.done}/${card.total}`}`}
       dimmed={complete}
-      onPress={() => openRecord(card.recordId)}
+      onPress={() => onOpen(card.recordId)}
       right={
         <Badge
           label={complete ? '已完成' : '清单'}
@@ -53,11 +56,13 @@ export function OccurrenceRow({
   today,
   first,
   readOnly,
+  onOpen = openRecord,
 }: {
   card: OccurrenceCard;
   today: string;
   first: boolean;
   readOnly: boolean;
+  onOpen?: (id: string) => void;
 }) {
   const invalidate = useInvalidateRecords();
   const setStatus = useMutation({
@@ -89,7 +94,7 @@ export function OccurrenceRow({
       title={card.title}
       subtitle={subtitle}
       dimmed={handled}
-      onPress={() => openRecord(card.recordId)}
+      onPress={() => onOpen(card.recordId)}
       right={
         handled ? (
           <>
