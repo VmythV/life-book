@@ -8,6 +8,10 @@ import {
   calendarRange,
   datesBetween,
   describeCalendarRange,
+  describeMonthCellDate,
+  isPastCalendarItem,
+  layoutTimedItems,
+  minutesOfDay,
   groupCalendarItems,
   shiftCalendarAnchor,
   startOfWeek,
@@ -189,13 +193,26 @@ describe('calendar ranges', () => {
   });
 
   it('describes the range shown', () => {
-    expect(describeCalendarRange('month', '2026-10-20')).toBe('2026年10月');
-    expect(describeCalendarRange('day', '2026-10-20')).toBe('2026年10月20日 周二');
-    expect(describeCalendarRange('week', '2026-10-20')).toBe('2026年10月19日–25日');
-    expect(describeCalendarRange('week', '2026-10-29')).toBe('2026年10月26日–11月1日');
-    expect(describeCalendarRange('week', '2026-12-30')).toBe(
-      '2026年12月28日–2027年1月3日',
+    const today = '2026-10-21';
+    expect(describeCalendarRange('month', '2026-10-20', today)).toBe('2026年10月');
+    expect(describeCalendarRange('day', '2026-10-21', today)).toBe('2026年10月21日 今天');
+    expect(describeCalendarRange('day', '2026-10-20', today)).toBe('2026年10月20日 昨天');
+    expect(describeCalendarRange('day', '2026-10-24', today)).toBe('2026年10月24日 周六');
+    expect(describeCalendarRange('week', '2026-10-20', today)).toBe(
+      '2026年10月19日 - 25日',
     );
+    expect(describeCalendarRange('week', '2026-10-29', today)).toBe(
+      '2026年10月26日 - 11月1日',
+    );
+    expect(describeCalendarRange('week', '2026-12-30', today)).toBe(
+      '2026年12月28日 - 2027年1月3日',
+    );
+  });
+
+  it('labels the first cell and the first of each month with the month', () => {
+    expect(describeMonthCellDate('2026-09-28', true)).toBe('9月28日');
+    expect(describeMonthCellDate('2026-09-29', false)).toBe('29');
+    expect(describeMonthCellDate('2026-10-01', false)).toBe('10月1日');
   });
 
   it('limits how many days one query covers', () => {
@@ -208,5 +225,66 @@ describe('calendar ranges', () => {
     expect(
       calendarQuerySchema.safeParse({ from: '2026-10-02', to: '2026-10-01' }).success,
     ).toBe(false);
+  });
+});
+
+describe('time grid', () => {
+  const occurrence = (title: string, time: string | null) =>
+    ({
+      kind: 'occurrence',
+      recordId: ids.water,
+      title,
+      date: '2026-10-21',
+      originalDate: '2026-10-21',
+      time,
+      status: 'pending',
+      moreCount: 0,
+    }) as const;
+
+  it('converts times to minutes', () => {
+    expect(minutesOfDay('00:00')).toBe(0);
+    expect(minutesOfDay('09:37')).toBe(577);
+    expect(minutesOfDay('23:59')).toBe(1439);
+  });
+
+  it('puts overlapping items side by side and leaves the rest full width', () => {
+    const blocks = layoutTimedItems([
+      occurrence('全天的', null),
+      occurrence('甲', '09:00'),
+      occurrence('乙', '09:10'),
+      occurrence('丙', '09:30'),
+      occurrence('丁', '09:45'),
+      occurrence('戊', '11:00'),
+    ]);
+    expect(
+      blocks.map((block) => [block.item.title, block.start, block.column, block.columns]),
+    ).toEqual([
+      ['甲', 540, 0, 2],
+      ['乙', 550, 1, 2],
+      // 甲在 9:30 结束，丙放回第一列；乙到 9:40 才结束，丁放第二列。
+      ['丙', 570, 0, 2],
+      ['丁', 585, 1, 2],
+      ['戊', 660, 0, 1],
+    ]);
+  });
+
+  it('knows which items are already past', () => {
+    const today = '2026-10-21';
+    expect(isPastCalendarItem({ ...occurrence('早', '08:00') }, today, '09:37')).toBe(
+      true,
+    );
+    expect(isPastCalendarItem({ ...occurrence('晚', '10:00') }, today, '09:37')).toBe(
+      false,
+    );
+    expect(isPastCalendarItem({ ...occurrence('全天', null) }, today, '23:00')).toBe(
+      false,
+    );
+    expect(
+      isPastCalendarItem(
+        { ...occurrence('昨天', null), date: '2026-10-20' },
+        today,
+        '00:00',
+      ),
+    ).toBe(true);
   });
 });
